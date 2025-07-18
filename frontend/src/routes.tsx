@@ -1,4 +1,4 @@
-import { RouteObject } from 'react-router-dom';
+import type { RouteObject } from 'react-router-dom';
 import Login from './pages/Login';
 import AdminLayout from './pages/AdminLayout';
 import UserManagement from './pages/UserManagement';

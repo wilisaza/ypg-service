@@ -37,10 +37,13 @@ model FinancialProduct {
   startYear       Int?             // Año de inicio
   endMonth        Int?             // Mes objetivo (1-12)
   endYear         Int?             // Año objetivo
+  penaltyAmount   Float?           // Monto de multa por pago tardío
+  graceDays       Int?             @default(5) // Días de gracia antes de aplicar multa
   
   // Campos específicos para PRESTAMO
   defaultInterest Float?           // Tasa de interés por defecto
   termMonths      Int?             // Plazo en meses por defecto
+  paymentMode     PaymentMode?     // Modalidad de pago del préstamo
   
   accounts        ProductAccount[]
   createdAt       DateTime         @default(now())
@@ -50,6 +53,11 @@ model FinancialProduct {
 enum ProductType {
   AHORRO
   PRESTAMO
+}
+
+enum PaymentMode {
+  CUOTAS_FIJAS     // Amortización francesa - cuotas fijas
+  ABONOS_LIBRES    // Abonos variables - interés mensual sobre saldo
 }
 
 model ProductAccount {
@@ -65,6 +73,11 @@ model ProductAccount {
   interest     Float?           // Solo para préstamos: Tasa de interés específica
   startDate    DateTime?        // Solo para préstamos: Fecha de inicio del préstamo
   endDate      DateTime?        // Solo para préstamos: Fecha de finalización del préstamo
+  paymentMode  PaymentMode?     // Modalidad de pago específica para este préstamo
+  
+  // Campos adicionales para modalidad ABONOS_LIBRES
+  outstandingBalance Float?     // Saldo pendiente actual del préstamo
+  lastInterestDate   DateTime?  // Última fecha de liquidación de intereses
   
   isActive     Boolean          @default(true)
   transactions Transaction[]
@@ -88,6 +101,12 @@ model Transaction {
   typeId    Int
   status    TransactionStatus    @default(PENDIENTE)
   date      DateTime             @default(now())
+  dueDate   DateTime?            // Fecha de vencimiento para cuotas
+  relatedTransactionId String?   @db.Uuid // ID de transacción relacionada (para multas y pagos)
+  relatedTransaction Transaction? @relation("RelatedTransactions", fields: [relatedTransactionId], references: [id])
+  relatedTo Transaction[]        @relation("RelatedTransactions")
+  month     Int?                 // Mes de la cuota (1-12) para cuotas de ahorro
+  year      Int?                 // Año de la cuota para cuotas de ahorro
   updatedAt DateTime             @updatedAt
 }
 

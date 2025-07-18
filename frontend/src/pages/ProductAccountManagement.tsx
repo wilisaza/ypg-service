@@ -26,6 +26,7 @@ import {
   Alert,
   Switch,
   FormControlLabel,
+  CircularProgress,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -40,13 +41,6 @@ const formatCurrencyWithDecimals = (amount: number): string => {
     currency: 'COP',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  }).format(amount);
-};
-
-const formatNumber = (amount: number): string => {
-  return new Intl.NumberFormat('es-CO', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
   }).format(amount);
 };
 
@@ -73,6 +67,7 @@ interface ProductAccount {
   interest?: number;
   startDate?: string;
   endDate?: string;
+  paymentMode?: 'CUOTAS_FIJAS' | 'ABONOS_LIBRES';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +84,7 @@ interface ProductAccountFormData {
   interest?: number;
   startDate?: string;
   endDate?: string;
+  paymentMode?: 'CUOTAS_FIJAS' | 'ABONOS_LIBRES';
   isActive: boolean;
 }
 
@@ -97,10 +93,12 @@ const ProductAccountManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [submitLoading, setSubmitLoading] = useState<boolean>(false);
   const [openDialog, setOpenDialog] = useState(false);
   const [editingAccount, setEditingAccount] = useState<ProductAccount | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [amountInputValue, setAmountInputValue] = useState<string>(''); // Estado separado para el input
 
   const [formData, setFormData] = useState<ProductAccountFormData>({
     userId: '',
@@ -110,6 +108,7 @@ const ProductAccountManagement: React.FC = () => {
     interest: undefined,
     startDate: '',
     endDate: '',
+    paymentMode: 'CUOTAS_FIJAS',
     isActive: true,
   });
 
@@ -190,8 +189,30 @@ const ProductAccountManagement: React.FC = () => {
         interest: account.interest || undefined,
         startDate: account.startDate ? account.startDate.split('T')[0] : '',
         endDate: account.endDate ? account.endDate.split('T')[0] : '',
+        paymentMode: account.paymentMode || 'CUOTAS_FIJAS',
         isActive: account.isActive,
       });
+      // Inicializar el input con el valor formateado (con separadores)
+      const formattedAmount = new Intl.NumberFormat('es-CO', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+      }).format(account.amount);
+      setAmountInputValue(formattedAmount);
+      
+      // Recalcular proyección y cuota mensual para cuentas existentes
+      if (account.product.type === 'PRESTAMO') {
+        calculateProjection({
+          userId: account.user.id,
+          productId: account.product.id,
+          amount: account.amount,
+          principal: account.principal || undefined,
+          interest: account.interest || undefined,
+          startDate: account.startDate ? account.startDate.split('T')[0] : '',
+          endDate: account.endDate ? account.endDate.split('T')[0] : '',
+          paymentMode: account.paymentMode || 'CUOTAS_FIJAS',
+          isActive: account.isActive,
+        });
+      }
     } else {
       setEditingAccount(null);
       setFormData({
@@ -202,8 +223,13 @@ const ProductAccountManagement: React.FC = () => {
         interest: undefined,
         startDate: '',
         endDate: '',
+        paymentMode: 'CUOTAS_FIJAS',
         isActive: true,
       });
+      // Inicializar el input vacío para nuevas cuentas
+      setAmountInputValue('');
+      setMonthlyPayment(0);
+      setNumberOfInstallments(0);
     }
     setOpenDialog(true);
   };
@@ -216,6 +242,7 @@ const ProductAccountManagement: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setSubmitLoading(true);
     try {
       const url = editingAccount
         ? `${apiUrl}/product-accounts/${editingAccount.id}`
@@ -244,13 +271,18 @@ const ProductAccountManagement: React.FC = () => {
 
       if (data.success) {
         setSuccess(editingAccount ? 'Cuenta actualizada exitosamente' : 'Cuenta creada exitosamente');
-        fetchProductAccounts();
+        
+        // Forzar recarga completa de datos
+        await fetchProductAccounts();
+        
         handleCloseDialog();
       } else {
         setError(data.error || 'Error al guardar la cuenta');
       }
     } catch {
       setError('Error de conexión al guardar la cuenta');
+    } finally {
+      setSubmitLoading(false);
     }
   };
 
@@ -287,6 +319,55 @@ const ProductAccountManagement: React.FC = () => {
         size="small"
       />
     );
+  };
+
+  // Estado para almacenar la cuota mensual calculada y número de cuotas
+  const [monthlyPayment, setMonthlyPayment] = useState<number>(0);
+  const [numberOfInstallments, setNumberOfInstallments] = useState<number>(0);
+
+  // Función para calcular automáticamente la proyección
+  const calculateProjection = (currentFormData: ProductAccountFormData) => {
+    const { amount, interest, startDate, endDate, paymentMode } = currentFormData;
+    
+    if (!amount || !interest || !startDate || !endDate) {
+      setMonthlyPayment(0);
+      setNumberOfInstallments(0);
+      return; // No calcular si faltan datos
+    }
+
+    // Calcular plazo en meses
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const termMonths = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30));
+    
+    if (termMonths <= 0) {
+      setMonthlyPayment(0);
+      setNumberOfInstallments(0);
+      return; // Plazo inválido
+    }
+
+    // Establecer el número de cuotas
+    setNumberOfInstallments(termMonths);
+
+    let projection = 0;
+    let calculatedMonthlyPayment = 0;
+    
+    if (paymentMode === 'CUOTAS_FIJAS') {
+      // Para cuotas fijas: calcular cuota mensual con amortización francesa
+      const monthlyRate = interest / 100;
+      calculatedMonthlyPayment = amount * (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / 
+                                (Math.pow(1 + monthlyRate, termMonths) - 1);
+      projection = Math.round((calculatedMonthlyPayment * termMonths) * 100) / 100;
+      setMonthlyPayment(Math.round(calculatedMonthlyPayment * 100) / 100);
+    } else {
+      // Para abonos libres: proyección incluye intereses mensuales sobre el monto total
+      const monthlyRate = interest / 100;
+      const totalInterest = amount * monthlyRate * termMonths;
+      projection = amount + totalInterest;
+      setMonthlyPayment(0); // No aplica cuota fija
+    }
+
+    setFormData(prev => ({ ...prev, principal: projection }));
   };
 
   const selectedProduct = products.find(p => p.id === formData.productId);
@@ -366,20 +447,10 @@ const ProductAccountManagement: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {account.product.type === 'PRESTAMO' && account.principal ? (
-                          <Box>
-                            <Typography variant="body2">
-                              {formatCurrencyWithDecimals(account.principal || 0)}
-                            </Typography>
-                            <Typography variant="caption" display="block" color="textSecondary">
-                              Proyección total
-                            </Typography>
-                            {account.interest && (
-                              <Typography variant="caption" color="textSecondary">
-                                Interés: {account.interest}%
-                              </Typography>
-                            )}
-                          </Box>
+                        {account.product.type === 'PRESTAMO' ? (
+                          <Typography variant="body2" color="textSecondary">
+                            -
+                          </Typography>
                         ) : (
                           <Box>
                             <Typography variant="body2">
@@ -426,7 +497,13 @@ const ProductAccountManagement: React.FC = () => {
       )}
 
       {/* Dialog para crear/editar cuenta */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
+      <Dialog 
+        open={openDialog} 
+        onClose={submitLoading ? undefined : handleCloseDialog} 
+        maxWidth="md" 
+        fullWidth
+        disableEscapeKeyDown={submitLoading}
+      >
         <DialogTitle>
           {editingAccount ? 'Editar Cuenta de Producto' : 'Nueva Cuenta de Producto'}
         </DialogTitle>
@@ -467,48 +544,112 @@ const ProductAccountManagement: React.FC = () => {
             <TextField
               fullWidth
               label={selectedProduct?.type === 'PRESTAMO' ? 'Monto a Prestar' : 'Monto'}
-              value={formData.amount > 0 ? formatCurrencyWithDecimals(formData.amount) : ''}
+              value={amountInputValue}
               onChange={(e) => {
-                // Extraer solo números y comas decimales
-                const cleanValue = e.target.value.replace(/[^0-9,]/g, '');
-                // Convertir coma decimal a punto para parseFloat
-                const numericValue = cleanValue.replace(',', '.');
-                const amount = parseFloat(numericValue) || 0;
-                setFormData({ ...formData, amount });
+                const inputValue = e.target.value;
+                setAmountInputValue(inputValue);
+                
+                // Convertir a número para el estado interno
+                if (inputValue === '') {
+                  setFormData({ ...formData, amount: 0 });
+                  return;
+                }
+                
+                // Permitir solo números y punto decimal
+                const cleanValue = inputValue.replace(/[^0-9.]/g, '');
+                
+                // Evitar múltiples puntos decimales
+                const parts = cleanValue.split('.');
+                const finalValue = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanValue;
+                
+                const amount = parseFloat(finalValue) || 0;
+                
+                if (amount <= 9999999999) { // Validación de límite
+                  const newFormData = { ...formData, amount };
+                  setFormData(newFormData);
+                  
+                  // Calcular proyección automáticamente para préstamos
+                  if (selectedProduct?.type === 'PRESTAMO') {
+                    calculateProjection(newFormData);
+                  }
+                }
               }}
-              placeholder="$ 0,00"
+              onBlur={() => {
+                // Al perder el foco, formatear el valor mostrado con separadores de miles
+                if (formData.amount > 0) {
+                  const formatted = new Intl.NumberFormat('es-CO', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2
+                  }).format(formData.amount);
+                  setAmountInputValue(formatted);
+                }
+              }}
+              onFocus={() => {
+                // Al recibir el foco, mostrar solo el número sin formato
+                if (formData.amount > 0) {
+                  setAmountInputValue(formData.amount.toString());
+                }
+              }}
+              placeholder="Ingrese el monto"
               helperText={selectedProduct?.type === 'PRESTAMO' ? 'Monto base que se le prestará al usuario' : 'Meta de ahorro total'}
             />
 
             {selectedProduct?.type === 'PRESTAMO' && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    label="Proyección Total"
-                    value={formData.principal ? formatCurrencyWithDecimals(formData.principal) : ''}
-                    helperText="Se calcula automáticamente (monto + intereses)"
-                    InputProps={{
-                      readOnly: true,
+                
+                {/* Modalidad de Pago - Justo después del monto */}
+                <FormControl fullWidth>
+                  <InputLabel>Modalidad de Pago</InputLabel>
+                  <Select
+                    value={formData.paymentMode || 'CUOTAS_FIJAS'}
+                    onChange={(e) => {
+                      const newPaymentMode = e.target.value as 'CUOTAS_FIJAS' | 'ABONOS_LIBRES';
+                      setFormData({ ...formData, paymentMode: newPaymentMode });
+                      calculateProjection({ ...formData, paymentMode: newPaymentMode });
                     }}
-                    sx={{ backgroundColor: '#f5f5f5' }}
-                  />
-                  <TextField
-                    fullWidth
-                    label="Interés (%)"
-                    type="number"
-                    value={formData.interest || ''}
-                    onChange={(e) => setFormData({ ...formData, interest: Number(e.target.value) || undefined })}
-                    helperText="Tasa de interés anual"
-                  />
-                </Box>
+                    label="Modalidad de Pago"
+                  >
+                    <MenuItem value="CUOTAS_FIJAS">
+                      Cuotas Fijas (Amortización Francesa)
+                    </MenuItem>
+                    <MenuItem value="ABONOS_LIBRES">
+                      Abonos Libres (Interés Mensual sobre Saldo)
+                    </MenuItem>
+                  </Select>
+                  <Typography variant="caption" sx={{ mt: 1, color: 'text.secondary' }}>
+                    {formData.paymentMode === 'CUOTAS_FIJAS' 
+                      ? 'Cuotas mensuales fijas calculadas con amortización francesa'
+                      : 'Abonos variables con interés mensual sobre el saldo pendiente'
+                    }
+                  </Typography>
+                </FormControl>
+
+                {/* Interés Mensual */}
+                <TextField
+                  fullWidth
+                  label="Interés Mensual (%)"
+                  type="number"
+                  value={formData.interest || ''}
+                  onChange={(e) => {
+                    const newInterest = Number(e.target.value) || undefined;
+                    setFormData({ ...formData, interest: newInterest });
+                    calculateProjection({ ...formData, interest: newInterest });
+                  }}
+                  helperText="Tasa de interés mensual (ej: 2.5 para 2.5% mensual)"
+                  inputProps={{ step: "0.1", min: "0" }}
+                />
+
+                {/* Fechas */}
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField
                     fullWidth
                     label="Fecha de Inicio"
                     type="date"
                     value={formData.startDate}
-                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, startDate: e.target.value });
+                      calculateProjection({ ...formData, startDate: e.target.value });
+                    }}
                     InputLabelProps={{ shrink: true }}
                   />
                   <TextField
@@ -516,10 +657,58 @@ const ProductAccountManagement: React.FC = () => {
                     label="Fecha de Fin"
                     type="date"
                     value={formData.endDate}
-                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, endDate: e.target.value });
+                      calculateProjection({ ...formData, endDate: e.target.value });
+                    }}
                     InputLabelProps={{ shrink: true }}
                   />
                 </Box>
+
+                {/* Número de Cuotas - Calculado automáticamente */}
+                {numberOfInstallments > 0 && (
+                  <TextField
+                    fullWidth
+                    label="Número de Cuotas"
+                    value={`${numberOfInstallments} ${numberOfInstallments === 1 ? 'mes' : 'meses'}`}
+                    helperText="Plazo calculado automáticamente entre las fechas de inicio y fin"
+                    InputProps={{
+                      readOnly: true,
+                    }}
+                    sx={{ backgroundColor: '#f9f9f9' }}
+                  />
+                )}
+
+                {/* Mostrar cuota mensual solo para cuotas fijas */}
+                {formData.paymentMode === 'CUOTAS_FIJAS' && monthlyPayment > 0 && (
+                  <TextField
+                    fullWidth
+                    label="Cuota Mensual"
+                    value={formatCurrencyWithDecimals(monthlyPayment)}
+                    helperText="Valor de la cuota mensual fija calculada"
+                    InputProps={{
+                      readOnly: true,
+                    }}
+                    sx={{ backgroundColor: '#f0f8ff' }}
+                  />
+                )}
+
+                {/* Proyección Total - Al final, calculada automáticamente */}
+                <TextField
+                  fullWidth
+                  label="Proyección Total"
+                  value={formData.principal ? formatCurrencyWithDecimals(formData.principal) : ''}
+                  helperText={
+                    formData.paymentMode === 'CUOTAS_FIJAS' 
+                      ? `Total a pagar: ${monthlyPayment > 0 && numberOfInstallments > 0 ? `${formatCurrencyWithDecimals(monthlyPayment)} x ${numberOfInstallments} cuotas` : 'cuota mensual x número de cuotas'}`
+                      : "Monto prestado + intereses proyectados (interés mensual sobre el monto total)"
+                  }
+                  InputProps={{
+                    readOnly: true,
+                  }}
+                  sx={{ backgroundColor: '#f5f5f5' }}
+                />
+
               </Box>
             )}
 
@@ -535,9 +724,19 @@ const ProductAccountManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancelar</Button>
-          <Button onClick={handleSubmit} variant="contained">
-            {editingAccount ? 'Actualizar' : 'Crear'}
+          <Button onClick={handleCloseDialog} disabled={submitLoading}>
+            Cancelar
+          </Button>
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained"
+            disabled={submitLoading}
+            startIcon={submitLoading ? <CircularProgress size={20} /> : null}
+          >
+            {submitLoading 
+              ? (editingAccount ? 'Actualizando...' : 'Creando...') 
+              : (editingAccount ? 'Actualizar' : 'Crear')
+            }
           </Button>
         </DialogActions>
       </Dialog>

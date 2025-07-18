@@ -1,7 +1,11 @@
 import { Request, Response } from 'express';
 import prisma from '../models/prismaClient.js';
 import { logger } from '../utils/logger.js';
-import { calculateLoanProjection } from '../utils/financialCalculations.js';
+import { 
+  calculateLoanProjection, 
+  calculateLoanProjectionMonthly, 
+  PaymentMode 
+} from '../utils/financialCalculations.js';
 
 // Obtener todas las cuentas de productos
 export async function getProductAccounts(req: Request, res: Response) {
@@ -99,40 +103,79 @@ export async function createProductAccount(req: Request, res: Response) {
       principal, 
       interest, 
       startDate, 
-      endDate 
+      endDate,
+      paymentMode 
     } = req.body;
 
+    // Validaciones requeridas
     if (!userId || !productId || !amount) {
       return res.status(400).json({ 
         success: false, 
-        error: 'El usuario, producto y monto son obligatorios.' 
+        error: 'userId, productId y amount son requeridos' 
       });
     }
 
     // Verificar que el usuario existe
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
     if (!user) {
       return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
     }
 
     // Verificar que el producto existe
-    const product = await prisma.financialProduct.findUnique({ where: { id: productId } });
+    const product = await prisma.financialProduct.findUnique({
+      where: { id: productId }
+    });
+
     if (!product) {
       return res.status(404).json({ success: false, error: 'Producto no encontrado' });
     }
 
+    // Validar modalidad de pago para préstamos
+    let finalPaymentMode = paymentMode;
+    if (product.type === 'PRESTAMO' && !paymentMode) {
+      finalPaymentMode = 'CUOTAS_FIJAS'; // Por defecto cuotas fijas
+    }
+
     // Calcular proyección automáticamente para préstamos
     let calculatedPrincipal = principal;
+    let outstandingBalance = null;
+    let lastInterestDate = null;
     
     if (product.type === 'PRESTAMO') {
       // Usar la tasa de interés específica o la por defecto del producto
       const interestRate = interest || product.defaultInterest;
-      // Usar el plazo por defecto del producto si no se especifican fechas
-      const termMonths = product.termMonths;
       
-      if (interestRate && termMonths) {
-        calculatedPrincipal = calculateLoanProjection(amount, interestRate, termMonths);
-        logger.info(`Proyección calculada para préstamo: ${amount} -> ${calculatedPrincipal}`);
+      // Calcular plazo en meses desde las fechas proporcionadas
+      let termMonths = product.termMonths; // valor por defecto
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        termMonths = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30));
+      }
+      
+      if (interestRate && termMonths && termMonths > 0) {
+        if (finalPaymentMode === 'CUOTAS_FIJAS') {
+          // Para cuotas fijas, usar interés mensual directamente
+          calculatedPrincipal = calculateLoanProjectionMonthly(amount, interestRate, termMonths);
+          logger.info(`Proyección calculada para préstamo con cuotas fijas (interés mensual ${interestRate}%): ${amount} -> ${calculatedPrincipal}`);
+        } else if (finalPaymentMode === 'ABONOS_LIBRES') {
+          // Para abonos libres, el principal es el monto original y se maneja el saldo pendiente
+          calculatedPrincipal = amount;
+          outstandingBalance = amount;
+          lastInterestDate = startDate ? new Date(startDate) : new Date();
+          logger.info(`Préstamo con abonos libres configurado: monto inicial ${amount}, saldo pendiente ${outstandingBalance}, interés mensual ${interestRate}%`);
+        }
+      } else {
+        // Si no hay suficiente información, usar el monto como principal
+        calculatedPrincipal = amount;
+        if (finalPaymentMode === 'ABONOS_LIBRES') {
+          outstandingBalance = amount;
+          lastInterestDate = startDate ? new Date(startDate) : new Date();
+        }
+        logger.info(`Préstamo creado sin cálculo automático (faltan datos): monto ${amount}`);
       }
     }
 
@@ -145,6 +188,9 @@ export async function createProductAccount(req: Request, res: Response) {
         interest,
         startDate: startDate ? new Date(startDate) : null,
         endDate: endDate ? new Date(endDate) : null,
+        paymentMode: finalPaymentMode,
+        outstandingBalance,
+        lastInterestDate,
       },
       include: {
         user: {
@@ -166,7 +212,7 @@ export async function createProductAccount(req: Request, res: Response) {
       }
     });
 
-    logger.info(`Cuenta de producto creada: ${account.id}`);
+    logger.info(`Cuenta de producto creada: ${account.id} con modalidad ${finalPaymentMode}`);
     res.status(201).json({ success: true, data: account });
   } catch (error: any) {
     logger.error(`Error al crear cuenta de producto: ${error.message}`);

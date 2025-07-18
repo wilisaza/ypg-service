@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Tooltip,
-  FormControl, InputLabel, Select, MenuItem
+  FormControl, InputLabel, Select, MenuItem, CircularProgress
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -22,6 +22,8 @@ interface Product {
   startYear?: number;
   endMonth?: number;
   endYear?: number;
+  penaltyAmount?: number;
+  graceDays?: number;
   
   // Campos específicos para PRESTAMO
   defaultInterest?: number;
@@ -39,6 +41,7 @@ export default function ProductManagement() {
   const [loading, setLoading] = useState<boolean>(false);
   const [open, setOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [submitLoading, setSubmitLoading] = useState(false);
   const [form, setForm] = useState<Partial<Product>>({ 
     name: '', 
     type: 'AHORRO', 
@@ -48,10 +51,24 @@ export default function ProductManagement() {
     startYear: undefined,
     endMonth: undefined,
     endYear: undefined,
+    penaltyAmount: undefined,
+    graceDays: 5,
     defaultInterest: undefined,
     termMonths: undefined
   });
   const [error, setError] = useState('');
+
+  // Funciones para formatear números con separadores de miles
+  const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('es-CO', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
+  };
+
+  const parseCurrency = (value: string): number => {
+    return parseInt(value.replace(/[^\d]/g, '')) || 0;
+  };
 
   const fetchProducts = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -92,6 +109,8 @@ export default function ProductManagement() {
         startYear: product.startYear,
         endMonth: product.endMonth,
         endYear: product.endYear,
+        penaltyAmount: product.penaltyAmount,
+        graceDays: product.graceDays || 5,
         defaultInterest: product.defaultInterest,
         termMonths: product.termMonths
       });
@@ -105,6 +124,8 @@ export default function ProductManagement() {
         startYear: undefined,
         endMonth: undefined,
         endYear: undefined,
+        penaltyAmount: undefined,
+        graceDays: 5,
         defaultInterest: undefined,
         termMonths: undefined
       });
@@ -125,6 +146,8 @@ export default function ProductManagement() {
       startYear: undefined,
       endMonth: undefined,
       endYear: undefined,
+      penaltyAmount: undefined,
+      graceDays: 5,
       defaultInterest: undefined,
       termMonths: undefined
     });
@@ -133,7 +156,7 @@ export default function ProductManagement() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const parsedValue = ['monthlyAmount', 'startMonth', 'startYear', 'endMonth', 'endYear', 'defaultInterest', 'termMonths'].includes(name)
+    const parsedValue = ['monthlyAmount', 'startMonth', 'startYear', 'endMonth', 'endYear', 'penaltyAmount', 'graceDays', 'defaultInterest', 'termMonths'].includes(name)
       ? value === '' ? undefined : Number(value)
       : value;
     setForm({ ...form, [name]: parsedValue });
@@ -143,12 +166,25 @@ export default function ProductManagement() {
     setForm({ ...form, [name]: value });
   };
 
+  const handleMonthlyAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const numericValue = parseCurrency(value);
+    setForm({ ...form, monthlyAmount: numericValue });
+  };
+
+  const handlePenaltyAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const numericValue = parseCurrency(value);
+    setForm({ ...form, penaltyAmount: numericValue });
+  };
+
   const handleSave = async () => {
     if (!form.name || !form.type) {
       setError('Completa todos los campos obligatorios.');
       return;
     }
     const token = localStorage.getItem('token');
+    setSubmitLoading(true);
     try {
       const payload = { ...form };
       const res = await fetch(
@@ -170,6 +206,8 @@ export default function ProductManagement() {
       fetchProducts();
     } catch {
       setError('Error al guardar producto');
+    } finally {
+      setSubmitLoading(false);
     }
   };
 
@@ -228,7 +266,7 @@ export default function ProductManagement() {
                   <TableCell>
                     {product.type === 'AHORRO' ? (
                       <div>
-                        {product.monthlyAmount && <div>Monto mensual: ${product.monthlyAmount}</div>}
+                        {product.monthlyAmount && <div>Monto mensual: ${formatCurrency(product.monthlyAmount)}</div>}
                         {product.startMonth && product.startYear && (
                           <div>Inicio: {product.startMonth}/{product.startYear}</div>
                         )}
@@ -306,11 +344,14 @@ export default function ProductManagement() {
                 <TextField
                   label="Monto Mensual"
                   name="monthlyAmount"
-                  type="number"
-                  value={form.monthlyAmount || ''}
-                  onChange={handleChange}
+                  value={form.monthlyAmount ? formatCurrency(form.monthlyAmount) : ''}
+                  onChange={handleMonthlyAmountChange}
                   fullWidth
-                  inputProps={{ min: 0, step: 1000 }}
+                  placeholder="0"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
                 />
                 <TextField
                   label="Mes de Inicio"
@@ -331,7 +372,7 @@ export default function ProductManagement() {
                   inputProps={{ min: 2024 }}
                 />
                 <TextField
-                  label="Mes Objetivo"
+                  label="Mes Fin"
                   name="endMonth"
                   type="number"
                   value={form.endMonth || ''}
@@ -340,13 +381,26 @@ export default function ProductManagement() {
                   inputProps={{ min: 1, max: 12 }}
                 />
                 <TextField
-                  label="Año Objetivo"
-                  name="endYear"
+                  label="Multa por Pago Tardío"
+                  name="penaltyAmount"
+                  value={form.penaltyAmount ? formatCurrency(form.penaltyAmount) : ''}
+                  onChange={handlePenaltyAmountChange}
+                  fullWidth
+                  placeholder="0"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                />
+                <TextField
+                  label="Días de Gracia"
+                  name="graceDays"
                   type="number"
-                  value={form.endYear || ''}
+                  value={form.graceDays || ''}
                   onChange={handleChange}
                   fullWidth
-                  inputProps={{ min: 2024 }}
+                  inputProps={{ min: 1, max: 30 }}
+                  helperText="Días antes de aplicar multa"
                 />
               </Box>
             </Box>
@@ -383,7 +437,14 @@ export default function ProductManagement() {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Cancelar</Button>
-          <Button onClick={handleSave} variant="contained">Guardar</Button>
+          <Button 
+            onClick={handleSave} 
+            variant="contained" 
+            disabled={submitLoading}
+            startIcon={submitLoading ? <CircularProgress size={20} /> : null}
+          >
+            {submitLoading ? 'Guardando...' : 'Guardar'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
