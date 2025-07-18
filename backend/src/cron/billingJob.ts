@@ -6,7 +6,7 @@ cron.schedule('0 2 * * *', async () => {
   const hoy = new Date();
   await generarCuotasPrestamo(hoy);
   await generarCuotasAhorro(hoy);
-  await generarMultasAhorro(hoy, 5000) //ejemplo: multa de 5000
+  await generarMultasAhorro(hoy, 5000); // ejemplo: multa de 5000
   console.log('Facturación ejecutada:', hoy);
 });
 
