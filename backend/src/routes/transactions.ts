@@ -1,18 +1,22 @@
 import { Router } from 'express';
 import { 
   getTransactions, 
-  getTransaction, 
+  getTransactionById, 
   createTransaction, 
-  updateTransaction, 
+  updateTransactionStatus, 
   deleteTransaction,
-  getLoanStatus 
 } from '../controllers/transactionController.js';
+import { authenticateToken } from '../middlewares/authMiddleware.js';
 
 const router = Router();
+
+// Aplicar middleware de autenticación a todas las rutas
+router.use(authenticateToken);
+
 router.get('/', getTransactions);
-router.get('/:id', getTransaction);
-router.get('/loan-status/:accountId', getLoanStatus);
+router.get('/:id', getTransactionById);
 router.post('/', createTransaction);
-router.put('/:id', updateTransaction);
+router.patch('/:id/status', updateTransactionStatus); // Usamos PATCH para actualizaciones parciales
 router.delete('/:id', deleteTransaction);
+
 export default router;

@@ -225,8 +225,19 @@ export default function ProductManagement() {
         navigate('/login');
         return;
       }
+      if (res.status === 409) {
+        window.alert('No se puede eliminar el producto porque tiene cuentas asociadas.');
+        return;
+      }
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        window.alert(`Error al eliminar producto: ${errorData.error || 'Error desconocido'}`);
+        return;
+      }
       fetchProducts();
-    } catch {
+      window.alert('Producto eliminado exitosamente.');
+    } catch (error) {
+      console.error('Error de conexión:', error);
       window.alert('Error al conectar con el servidor.');
     }
   };
@@ -246,15 +257,21 @@ export default function ProductManagement() {
           </svg>
         </Box>
       ) : (
-        <TableContainer component={Paper}>
-          <Table>
+        <TableContainer 
+          component={Paper} 
+          sx={{ 
+            maxHeight: 'calc(100vh - 180px)',
+            overflow: 'auto'
+          }}
+        >
+          <Table stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell>Nombre</TableCell>
-                <TableCell>Tipo</TableCell>
-                <TableCell>Descripción</TableCell>
-                <TableCell>Detalles Específicos</TableCell>
-                <TableCell align="right">Acciones</TableCell>
+                <TableCell sx={{ minWidth: 180 }}>Nombre</TableCell>
+                <TableCell sx={{ minWidth: 100 }}>Tipo</TableCell>
+                <TableCell sx={{ minWidth: 200 }}>Descripción</TableCell>
+                <TableCell sx={{ minWidth: 200 }}>Detalles Específicos</TableCell>
+                <TableCell align="right" sx={{ minWidth: 120 }}>Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -273,6 +290,8 @@ export default function ProductManagement() {
                         {product.endMonth && product.endYear && (
                           <div>Fin: {product.endMonth}/{product.endYear}</div>
                         )}
+                        {product.penaltyAmount && <div>Multa: ${formatCurrency(product.penaltyAmount)}</div>}
+                        {product.graceDays && <div>Días gracia: {product.graceDays}</div>}
                       </div>
                     ) : (
                       <div>

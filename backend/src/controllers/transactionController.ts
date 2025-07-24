@@ -1,52 +1,20 @@
 import { Request, Response } from 'express';
 import prisma from '../models/prismaClient.js';
 import { logger } from '../utils/logger.js';
-import { 
-  calculateMonthlyPayment, 
-  calculateMonthlyInterestOnBalance, 
-  calculateMonthlyInterestOnBalanceFromMonthly,
-  applyPaymentToBalance,
-  PaymentMode 
-} from '../utils/financialCalculations.js';
+import { TransactionStatus, TransactionType } from '@prisma/client';
 
-// Función auxiliar para obtener el estado actual de un préstamo con abonos libres
-async function getCurrentLoanStatus(accountId: string) {
-  const account = await prisma.productAccount.findUnique({
-    where: { id: accountId },
-    include: {
-      product: true
-    }
-  });
-
-  if (!account || account.product.type !== 'PRESTAMO' || account.paymentMode !== 'ABONOS_LIBRES') {
-    return null;
-  }
-
-  const currentBalance = account.outstandingBalance || account.amount;
-  const interestRate = account.interest || account.product.defaultInterest || 0;
-  const lastDate = account.lastInterestDate || account.startDate || account.createdAt;
-  const currentDate = new Date();
-  const daysDiff = Math.floor((currentDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-
-  let accruedInterest = 0;
-  if (daysDiff >= 30) {
-    // Usar función de interés mensual directo
-    accruedInterest = calculateMonthlyInterestOnBalanceFromMonthly(currentBalance, interestRate);
-  }
-
-  return {
-    currentBalance,
-    accruedInterest,
-    totalOwed: currentBalance + accruedInterest,
-    daysSinceLastInterest: daysDiff,
-    interestRate
-  };
-}
-
-// Obtener todas las transacciones
+// Obtener todas las transacciones con filtros
 export async function getTransactions(req: Request, res: Response) {
   try {
+    const { accountId, type, status } = req.query;
+
+    const where: any = {};
+    if (accountId) where.accountId = accountId as string;
+    if (type) where.type = type as TransactionType;
+    if (status) where.status = status as TransactionStatus;
+
     const transactions = await prisma.transaction.findMany({
+      where,
       include: {
         account: {
           include: {
@@ -55,22 +23,21 @@ export async function getTransactions(req: Request, res: Response) {
                 id: true,
                 username: true,
                 fullName: true,
-              }
+              },
             },
             product: {
               select: {
                 id: true,
                 name: true,
                 type: true,
-              }
-            }
-          }
+              },
+            },
+          },
         },
-        type: true,
       },
       orderBy: {
-        date: 'desc'
-      }
+        date: 'desc',
+      },
     });
 
     res.json({ success: true, data: transactions });
@@ -80,34 +47,19 @@ export async function getTransactions(req: Request, res: Response) {
   }
 }
 
-// Obtener una transacción específica
-export async function getTransaction(req: Request, res: Response) {
+// Obtener una transacción por ID
+export async function getTransactionById(req: Request, res: Response) {
   try {
-    const { id } = req.params;
-
     const transaction = await prisma.transaction.findUnique({
-      where: { id },
+      where: { id: req.params.id },
       include: {
         account: {
           include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                fullName: true,
-              }
-            },
-            product: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-              }
-            }
-          }
+            user: true,
+            product: true,
+          },
         },
-        type: true,
-      }
+      },
     });
 
     if (!transaction) {
@@ -120,231 +72,169 @@ export async function getTransaction(req: Request, res: Response) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
-// Crear una nueva transacción
+
+// Crear una nueva transacción (ej: un pago manual, un depósito)
 export async function createTransaction(req: Request, res: Response) {
   try {
-    const { accountId, amount, typeId, description } = req.body;
+    const { accountId, amount, type, description, status } = req.body;
 
-    // Validaciones básicas
-    if (!accountId || !amount || !typeId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'accountId, amount y typeId son requeridos' 
+    if (!accountId || !amount || !type) {
+      return res.status(400).json({
+        success: false,
+        error: 'accountId, amount y type son requeridos',
       });
     }
 
-    // Verificar que la cuenta existe
-    const account = await prisma.productAccount.findUnique({
-      where: { id: accountId },
-      include: {
-        product: true
-      }
-    });
-
+    const account = await prisma.account.findUnique({ where: { id: accountId } });
     if (!account) {
       return res.status(404).json({ success: false, error: 'Cuenta no encontrada' });
     }
 
-    // Verificar que el tipo de transacción existe
-    const transactionType = await prisma.transactionTypeDetail.findUnique({
-      where: { id: typeId }
-    });
-
-    if (!transactionType) {
-      return res.status(404).json({ success: false, error: 'Tipo de transacción no encontrado' });
+    // Lógica de impacto en el balance
+    let balanceChange = 0;
+    if (type === TransactionType.DEPOSIT || type === TransactionType.ADJUSTMENT_CREDIT) {
+        balanceChange = amount;
+    } else if (type === TransactionType.WITHDRAWAL || type === TransactionType.ADJUSTMENT_DEBIT) {
+        balanceChange = -amount;
+    }
+    // Otros tipos como FEE_PAYMENT, PENALTY_FEE se manejan en sus propios servicios
+    // pero si se crean manualmente, también deberían afectar el balance.
+    // Por ejemplo, un pago a un préstamo reduce la deuda (aumenta el balance hacia cero).
+    else if (type === TransactionType.FEE_PAYMENT || type === TransactionType.PENALTY_FEE) {
+        balanceChange = amount; // Un pago aumenta el balance (reduce la deuda)
     }
 
-    // Para préstamos, manejar las diferentes modalidades de pago
-    let updatedAccount = null;
-    if (account.product.type === 'PRESTAMO' && transactionType.nature === 'credito') {
-      if (account.paymentMode === 'ABONOS_LIBRES') {
-        // Para abonos libres, aplicar el pago al saldo pendiente
-        const currentBalance = account.outstandingBalance || account.amount;
-        const interestRate = account.interest || account.product.defaultInterest || 0;
-        
-        // Calcular interés acumulado desde la última fecha de liquidación
-        const lastDate = account.lastInterestDate || account.startDate || account.createdAt;
-        const currentDate = new Date();
-        const daysDiff = Math.floor((currentDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (daysDiff >= 30) { // Si ha pasado al menos un mes
-          const accruedInterest = calculateMonthlyInterestOnBalanceFromMonthly(currentBalance, interestRate);
-          const newBalanceWithInterest = currentBalance + accruedInterest;
-          
-          // Aplicar el pago al nuevo balance
-          const remainingBalance = applyPaymentToBalance(newBalanceWithInterest, amount);
 
-          // Actualizar la cuenta con el nuevo saldo
-          updatedAccount = await prisma.productAccount.update({
-            where: { id: accountId },
+    const [transaction, updatedAccount] = await prisma.$transaction([
+        prisma.transaction.create({
             data: {
-              outstandingBalance: remainingBalance,
-              lastInterestDate: currentDate,
-            }
-          });
-
-          logger.info(`Pago de abono libre aplicado: Interés mensual acumulado ${accruedInterest}, Saldo con interés ${newBalanceWithInterest}, Pago ${amount}, Saldo restante ${remainingBalance}`);
-        } else {
-          // No ha pasado suficiente tiempo, aplicar directamente al principal
-          const remainingBalance = applyPaymentToBalance(currentBalance, amount);
-          
-          updatedAccount = await prisma.productAccount.update({
-            where: { id: accountId },
-            data: {
-              outstandingBalance: remainingBalance,
-            }
-          });
-
-          logger.info(`Pago directo al principal: ${amount}, Saldo restante ${remainingBalance}`);
-        }
-      } else if (account.paymentMode === 'CUOTAS_FIJAS') {
-        // Para cuotas fijas, la lógica es más simple - es un pago programado
-        logger.info(`Pago de cuota fija registrado: ${amount}`);
-      }
-    }
-
-    // Crear la transacción
-    const transaction = await prisma.transaction.create({
-      data: {
-        accountId,
-        amount,
-        typeId,
-        status: 'PAGADA',
-        date: new Date(),
-      },
-      include: {
-        account: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                fullName: true,
-              }
+              accountId,
+              amount,
+              type,
+              description,
+              status: status || TransactionStatus.COMPLETED,
             },
-            product: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-              }
-            }
-          }
-        },
-        type: true,
-      }
-    });
+        }),
+        prisma.account.update({
+            where: { id: accountId },
+            data: { balance: { increment: balanceChange } },
+        }),
+    ]);
 
-    logger.info(`Transacción creada: ${transaction.id} por ${amount}`);
-    res.status(201).json({ 
-      success: true, 
+
+    logger.info(`Transacción creada: ${transaction.id} por ${amount}. Nuevo balance de cuenta: ${updatedAccount.balance}`);
+    res.status(201).json({
+      success: true,
       data: transaction,
-      accountUpdate: updatedAccount 
     });
   } catch (error: any) {
     logger.error(`Error al crear transacción: ${error.message}`);
     res.status(500).json({ success: false, error: error.message });
   }
 }
-// Actualizar una transacción
-export async function updateTransaction(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
-    const { amount, typeId, status, description } = req.body;
 
-    // Verificar que la transacción existe
-    const existingTransaction = await prisma.transaction.findUnique({
-      where: { id }
-    });
-
-    if (!existingTransaction) {
-      return res.status(404).json({ success: false, error: 'Transacción no encontrada' });
-    }
-
-    // Actualizar la transacción
-    const transaction = await prisma.transaction.update({
-      where: { id },
-      data: {
-        ...(amount && { amount }),
-        ...(typeId && { typeId }),
-        ...(status && { status }),
-        updatedAt: new Date(),
-      },
-      include: {
-        account: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                fullName: true,
-              }
-            },
-            product: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-              }
-            }
-          }
-        },
-        type: true,
+// Actualizar una transacción (ej: cambiar estado de PENDING a COMPLETED)
+export async function updateTransactionStatus(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+  
+      if (!status || !Object.values(TransactionStatus).includes(status)) {
+        return res.status(400).json({ success: false, error: 'Estado no válido' });
       }
-    });
+  
+      const transactionToUpdate = await prisma.transaction.findUnique({ where: { id } });
+  
+      if (!transactionToUpdate) {
+        return res.status(404).json({ success: false, error: 'Transacción no encontrada' });
+      }
+  
+      // Lógica de negocio al completar un pago
+      if (status === TransactionStatus.COMPLETED && transactionToUpdate.status !== TransactionStatus.COMPLETED) {
+        
+        // El balance se afecta basado en el tipo de transacción
+        let balanceChange = 0;
+        if (transactionToUpdate.type === TransactionType.FEE_PAYMENT || transactionToUpdate.type === TransactionType.PENALTY_FEE) {
+            // Pagar una cuota o multa reduce la deuda, lo que significa que el balance (que es negativo) aumenta.
+            balanceChange = transactionToUpdate.amount;
+        } else if (transactionToUpdate.type === TransactionType.DEPOSIT) {
+            balanceChange = transactionToUpdate.amount;
+        } else if (transactionToUpdate.type === TransactionType.WITHDRAWAL) {
+            balanceChange = -transactionToUpdate.amount;
+        }
 
-    logger.info(`Transacción actualizada: ${transaction.id}`);
-    res.json({ success: true, data: transaction });
-  } catch (error: any) {
-    logger.error(`Error al actualizar transacción: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
+        const [updatedTransaction, updatedAccount] = await prisma.$transaction([
+            prisma.transaction.update({
+                where: { id },
+                data: { status },
+            }),
+            prisma.account.update({
+                where: { id: transactionToUpdate.accountId },
+                data: { balance: { increment: balanceChange } },
+            }),
+        ]);
+
+        logger.info(`Transacción ${id} completada. Balance de cuenta actualizado a ${updatedAccount.balance}`);
+        return res.json({ success: true, data: updatedTransaction });
+
+      } else {
+        // Si solo es un cambio de estado sin lógica de negocio compleja
+        const updatedTransaction = await prisma.transaction.update({
+            where: { id },
+            data: { status },
+        });
+        logger.info(`Estado de transacción ${id} actualizado a ${status}`);
+        return res.json({ success: true, data: updatedTransaction });
+      }
+  
+    } catch (error: any) {
+      logger.error(`Error al actualizar estado de transacción: ${error.message}`);
+      res.status(500).json({ success: false, error: error.message });
+    }
   }
-}
+  
 
-// Eliminar una transacción
+// Eliminar una transacción (¡Usar con cuidado!)
 export async function deleteTransaction(req: Request, res: Response) {
   try {
     const { id } = req.params;
 
-    // Verificar que la transacción existe
     const existingTransaction = await prisma.transaction.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!existingTransaction) {
       return res.status(404).json({ success: false, error: 'Transacción no encontrada' });
     }
 
-    // Eliminar la transacción
-    await prisma.transaction.delete({
-      where: { id }
-    });
+    // Revertir el impacto en el balance si la transacción fue completada
+    if (existingTransaction.status === TransactionStatus.COMPLETED) {
+        let balanceChange = 0;
+        if (existingTransaction.type === TransactionType.DEPOSIT || existingTransaction.type === TransactionType.ADJUSTMENT_CREDIT || existingTransaction.type === TransactionType.FEE_PAYMENT || existingTransaction.type === TransactionType.PENALTY_FEE) {
+            balanceChange = -existingTransaction.amount; // Revertir el crédito
+        } else if (existingTransaction.type === TransactionType.WITHDRAWAL || existingTransaction.type === TransactionType.ADJUSTMENT_DEBIT) {
+            balanceChange = existingTransaction.amount; // Revertir el débito
+        }
 
-    logger.info(`Transacción eliminada: ${id}`);
+        await prisma.$transaction([
+            prisma.account.update({
+                where: { id: existingTransaction.accountId },
+                data: { balance: { increment: balanceChange } },
+            }),
+            prisma.transaction.delete({ where: { id } }),
+        ]);
+
+        logger.warn(`Transacción ${id} eliminada y su impacto en el balance ha sido revertido.`);
+
+    } else {
+        // Si no estaba completada, solo se borra
+        await prisma.transaction.delete({ where: { id } });
+        logger.warn(`Transacción ${id} (estado: ${existingTransaction.status}) eliminada.`);
+    }
+
     res.status(204).end();
   } catch (error: any) {
     logger.error(`Error al eliminar transacción: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
-  }
-}
-
-// Obtener el estado actual de un préstamo
-export async function getLoanStatus(req: Request, res: Response) {
-  try {
-    const { accountId } = req.params;
-
-    const loanStatus = await getCurrentLoanStatus(accountId);
-
-    if (!loanStatus) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Cuenta no encontrada o no es un préstamo con abonos libres' 
-      });
-    }
-
-    res.json({ success: true, data: loanStatus });
-  } catch (error: any) {
-    logger.error(`Error al obtener estado del préstamo: ${error.message}`);
     res.status(500).json({ success: false, error: error.message });
   }
 }

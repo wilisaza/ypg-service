@@ -1,4 +1,4 @@
-import { PrismaClient, TransactionCategory } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -9,23 +9,19 @@ async function seedSavingsTransactionTypes() {
   const transactionTypes = [
     {
       name: 'CUOTA_AHORRO_MENSUAL',
-      nature: 'debito',
-      category: TransactionCategory.CUOTA_AHORRO
+      nature: 'debito'
     },
     {
       name: 'MULTA_PAGO_TARDIO',
-      nature: 'debito', 
-      category: TransactionCategory.MULTA
+      nature: 'debito'
     },
     {
       name: 'PAGO_USUARIO',
-      nature: 'credito',
-      category: TransactionCategory.PAGO
+      nature: 'credito'
     },
     {
       name: 'INTERES_PRESTAMO',
-      nature: 'debito',
-      category: TransactionCategory.INTERES
+      nature: 'debito'
     }
   ];
 

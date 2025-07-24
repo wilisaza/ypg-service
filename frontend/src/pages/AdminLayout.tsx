@@ -18,7 +18,7 @@ export default function AdminLayout({ username, onLogout }: AdminLayoutProps) {
   // Solo muestra el recuadro si la ruta coincide
   const showUserManagement = location.pathname === '/dashboard/ADMIN/users';
   const showProductManagement = location.pathname === '/dashboard/ADMIN/products';
-  const showProductAccountManagement = location.pathname === '/dashboard/ADMIN/product-accounts';
+  const showAccountManagement = location.pathname === '/dashboard/ADMIN/accounts';
 
   return (
     <Box minHeight="100vh" width="100vw" bgcolor="background.default">
@@ -77,7 +77,7 @@ export default function AdminLayout({ username, onLogout }: AdminLayoutProps) {
         </Box>
       )}
 
-      {showProductAccountManagement && (
+      {showAccountManagement && (
         <Box
           position="fixed"
           top="50%"

@@ -1,6 +1,6 @@
 import cron from 'node-cron';
-import SavingsQuotaService from './savingsQuotaService.js';
-import PaymentOverdueService from './paymentOverdueService.js';
+import { SavingsQuotaService } from './savingsQuotaService.js';
+import { PaymentOverdueService } from './paymentOverdueService.js';
 import { logger } from '../utils/logger.js';
 
 export class CronJobService {

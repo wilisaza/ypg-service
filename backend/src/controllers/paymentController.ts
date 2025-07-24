@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import PaymentCompensationService from '../services/paymentCompensationService.js';
+import { PaymentCompensationService } from '../services/paymentCompensationService.js';
 import CronJobService from '../services/cronJobService.js';
 
 const paymentService = new PaymentCompensationService();

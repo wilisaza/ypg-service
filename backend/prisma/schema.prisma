@@ -1,119 +1,149 @@
-generator client {
-  provider = "prisma-client-js"
-}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ===================================================================
+// MODELOS DE USUARIO Y AUTENTICACIÓN
+// ===================================================================
 model User {
-  id        String           @id @default(uuid()) @db.Uuid
-  username  String           @unique
-  password  String
-  email     String           @unique
-  fullName  String
-  isActive  Boolean          @default(true)
-  role      Role             @default(USER)
-  accounts  ProductAccount[]
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id         String    @id @default(uuid())
+  username   String    @unique
+  password   String
+  fullName   String
+  email      String    @unique
+  role       Role      @default(USER)
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  accounts   Account[]
 }
 
 enum Role {
-  ADMIN
   USER
+  ADMIN
 }
 
-model FinancialProduct {
-  id              String           @id @default(uuid()) @db.Uuid
-  name            String
-  type            ProductType
-  description     String?
-  
-  // Campos específicos para AHORRO
-  monthlyAmount   Float?           // Monto mensual a ahorrar
-  startMonth      Int?             // Mes de inicio (1-12)
-  startYear       Int?             // Año de inicio
-  endMonth        Int?             // Mes objetivo (1-12)
-  endYear         Int?             // Año objetivo
-  penaltyAmount   Float?           // Monto de multa por pago tardío
-  graceDays       Int?             @default(5) // Días de gracia antes de aplicar multa
-  
-  // Campos específicos para PRESTAMO
-  defaultInterest Float?           // Tasa de interés por defecto
-  termMonths      Int?             // Plazo en meses por defecto
-  paymentMode     PaymentMode?     // Modalidad de pago del préstamo
-  
-  accounts        ProductAccount[]
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+// ===================================================================
+// MODELO DE PRODUCTO (Plantilla Simplificada)
+// ===================================================================
+model Product {
+  id           Int         @id @default(autoincrement())
+  name         String      @unique
+  type         ProductType
+  description  String?
+  interestRate Float?      // Tasa de interés anual (ej: 0.05 para 5%)
+  minBalance   Float?
+  maxBalance   Float?
+  monthlyFee   Float?      // Cuota de manejo mensual o interés mensual fijo
+  penaltyRate  Float?      // Tasa de multa por atraso (ej: 2% sobre la cuota)
+  graceDays    Int?        @default(5)
+  loanType     LoanType?   // Tipo de modalidad de crédito
+  accounts     Account[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  isActive     Boolean     @default(true)
 }
 
 enum ProductType {
-  AHORRO
-  PRESTAMO
+  SAVINGS
+  LOAN
 }
 
-enum PaymentMode {
-  CUOTAS_FIJAS     // Amortización francesa - cuotas fijas
-  ABONOS_LIBRES    // Abonos variables - interés mensual sobre saldo
+enum LoanType {
+  FRENCH_SYSTEM      // Sistema francés (cuota fija)
+  VARIABLE_CAPITAL   // Capital variable con interés mensual fijo
 }
 
-model ProductAccount {
-  id           String           @id @default(uuid()) @db.Uuid
-  user         User             @relation(fields: [userId], references: [id])
-  userId       String           @db.Uuid
-  product      FinancialProduct @relation(fields: [productId], references: [id])
-  productId    String           @db.Uuid
-  amount       Float            // Monto base (para ahorros: meta total, para préstamos: monto a prestar)
-  
-  // Campos específicos para préstamos (pueden sobrescribir los defaults del producto)
-  principal    Float?           // Solo para préstamos: Proyección total (amount + intereses calculados)
-  interest     Float?           // Solo para préstamos: Tasa de interés específica
-  startDate    DateTime?        // Solo para préstamos: Fecha de inicio del préstamo
-  endDate      DateTime?        // Solo para préstamos: Fecha de finalización del préstamo
-  paymentMode  PaymentMode?     // Modalidad de pago específica para este préstamo
-  
-  // Campos adicionales para modalidad ABONOS_LIBRES
-  outstandingBalance Float?     // Saldo pendiente actual del préstamo
-  lastInterestDate   DateTime?  // Última fecha de liquidación de intereses
-  
-  isActive     Boolean          @default(true)
-  transactions Transaction[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-}
-
-model TransactionTypeDetail {
-  id          Int             @id @default(autoincrement())
-  name        String           @unique
-  nature      String           // "debito" o "credito"
+// ===================================================================
+// MODELO DE CUENTA (El Corazón del Sistema)
+// ===================================================================
+model Account {
+  id           String        @id @default(uuid())
+  user         User          @relation(fields: [userId], references: [id])
+  userId       String
+  product      Product       @relation(fields: [productId], references: [id])
+  productId    Int
+  balance      Float         @default(0)
+  loanDetails  LoanDetails?
+  savingsGoal  Float?
+  status       AccountStatus @default(ACTIVE)
+  openedAt     DateTime      @default(now())
+  closedAt     DateTime?
+  updatedAt    DateTime      @updatedAt
   transactions Transaction[]
 }
 
+enum AccountStatus {
+  ACTIVE
+  DORMANT
+  CLOSED
+  BLOCKED
+}
+
+// ===================================================================
+// DETALLES DE PRÉSTAMO
+// ===================================================================
+model LoanDetails {
+  id                   String     @id @default(uuid())
+  account              Account    @relation(fields: [accountId], references: [id])
+  accountId            String     @unique
+  principalAmount      Float      // Monto original del préstamo
+  currentBalance       Float      // Saldo actual de capital pendiente
+  termMonths           Int        // Plazo en meses
+  monthlyPayment       Float?     // Cuota mensual (solo para sistema francés)
+  interestRate         Float      // Tasa de interés anual
+  monthlyInterestAmount Float?    // Interés mensual fijo (para capital variable)
+  disbursementDate     DateTime?  // Fecha de desembolso
+  maturityDate         DateTime?  // Fecha de vencimiento (máximo 30 nov)
+  amortizationSchedule Json?      // Tabla de amortización (sistema francés)
+  loanType             LoanType   @default(FRENCH_SYSTEM)
+}
+
+// ===================================================================
+// MODELO DE TRANSACCIÓN (Simplificado y Potente)
+// ===================================================================
 model Transaction {
-  id        String               @id @default(uuid()) @db.Uuid
-  account   ProductAccount       @relation(fields: [accountId], references: [id])
-  accountId String               @db.Uuid
-  amount    Float
-  type      TransactionTypeDetail @relation(fields: [typeId], references: [id])
-  typeId    Int
-  status    TransactionStatus    @default(PENDIENTE)
-  date      DateTime             @default(now())
-  dueDate   DateTime?            // Fecha de vencimiento para cuotas
-  relatedTransactionId String?   @db.Uuid // ID de transacción relacionada (para multas y pagos)
-  relatedTransaction Transaction? @relation("RelatedTransactions", fields: [relatedTransactionId], references: [id])
-  relatedTo Transaction[]        @relation("RelatedTransactions")
-  month     Int?                 // Mes de la cuota (1-12) para cuotas de ahorro
-  year      Int?                 // Año de la cuota para cuotas de ahorro
-  updatedAt DateTime             @updatedAt
+  id          String            @id @default(uuid())
+  account     Account           @relation(fields: [accountId], references: [id])
+  accountId   String
+  amount      Float
+  type        TransactionType
+  status      TransactionStatus @default(COMPLETED)
+  date        DateTime          @default(now())
+  description String?
+  dueDate     DateTime?
+  month       Int?
+  year        Int?
+  updatedAt   DateTime          @updatedAt
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  INTEREST_ACCRUED      // Intereses devengados (diarios)
+  INTEREST_PAYMENT      // Pago de intereses
+  LOAN_DISBURSEMENT
+  LOAN_PAYMENT          // Pago de capital
+  FEE_PAYMENT
+  PENALTY_FEE
+  MANAGEMENT_FEE
+  ADJUSTMENT_CREDIT
+  ADJUSTMENT_DEBIT
 }
 
 enum TransactionStatus {
-  PENDIENTE
-  PAGADA
-  VENCIDA
+  PENDING
+  COMPLETED
+  OVERDUE
+  CANCELED
 }
 
 

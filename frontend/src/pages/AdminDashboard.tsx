@@ -31,7 +31,7 @@ export default function AdminDashboard({ username, onLogout }: AdminDashboardPro
     handleClose();
     if (option === 'Gestión de Usuarios') navigate('/dashboard/ADMIN/users');
     if (option === 'Gestión de Productos') navigate('/dashboard/ADMIN/products');
-    if (option === 'Gestión de Cuentas de Productos') navigate('/dashboard/ADMIN/product-accounts');
+    if (option === 'Gestión de Cuentas') navigate('/dashboard/ADMIN/accounts');
     // Aquí puedes agregar más opciones de menú
   };
   return (
@@ -69,7 +69,7 @@ export default function AdminDashboard({ username, onLogout }: AdminDashboardPro
         <Menu anchorEl={anchorEl} open={open} onClose={handleClose}>
           <MenuItem onClick={() => handleMenuItemClick('Gestión de Usuarios')}>Gestión de Usuarios</MenuItem>
           <MenuItem onClick={() => handleMenuItemClick('Gestión de Productos')}>Gestión de Productos</MenuItem>
-          <MenuItem onClick={() => handleMenuItemClick('Gestión de Cuentas de Productos')}>Gestión de Cuentas de Productos</MenuItem>
+          <MenuItem onClick={() => handleMenuItemClick('Gestión de Cuentas')}>Gestión de Cuentas</MenuItem>
           <MenuItem onClick={() => handleMenuItemClick('Reportes')}>Reportes</MenuItem>
         </Menu>
       </AppBar>
