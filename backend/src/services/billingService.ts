@@ -11,7 +11,7 @@ import { addDays } from 'date-fns';
  * 1. Genera las cuotas de PRÉSTAMO mensuales para todas las cuentas de préstamo activas.
  * @param fechaProceso La fecha en que se corre el proceso.
  */
-async function generarCuotasPrestamo(fechaProceso: Date) {
+export async function generarCuotasPrestamo(fechaProceso: Date) {
   const mes = fechaProceso.getMonth() + 1;
   const año = fechaProceso.getFullYear();
   logger.info(`🏦 Iniciando generación de cuotas de PRÉSTAMO para ${mes}/${año}`);
@@ -45,6 +45,14 @@ async function generarCuotasPrestamo(fechaProceso: Date) {
       }
 
       const montoCuota = cuenta.loanDetails!.monthlyPayment;
+      
+      // Verificar que montoCuota no sea null
+      if (!montoCuota) {
+        logger.error(`❌ Error: montoCuota es null para cuenta ${cuenta.id}`);
+        errores++;
+        continue;
+      }
+      
       const fechaVencimiento = new Date(año, mes - 1, 5); // Vence el 5 de cada mes
 
       await prisma.transaction.create({

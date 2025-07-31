@@ -19,6 +19,14 @@ export async function getProducts(req: Request, res: Response) {
         monthlyFee: true,
         penaltyRate: true,
         graceDays: true,
+        loanType: true,
+        // Campos específicos para planes de ahorro
+        monthlyAmount: true,
+        billingDay: true,
+        penaltyAmount: true,
+        startMonth: true,
+        endMonth: true,
+        planYear: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -49,6 +57,14 @@ export async function getProduct(req: Request, res: Response) {
         monthlyFee: true,
         penaltyRate: true,
         graceDays: true,
+        loanType: true,
+        // Campos específicos para planes de ahorro
+        monthlyAmount: true,
+        billingDay: true,
+        penaltyAmount: true,
+        startMonth: true,
+        endMonth: true,
+        planYear: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -70,7 +86,27 @@ export async function getProduct(req: Request, res: Response) {
 // Crear un nuevo producto
 export async function createProduct(req: Request, res: Response) {
   try {
-    const { name, type, description, interestRate, minBalance, maxBalance, monthlyFee, penaltyRate, graceDays } = req.body;
+    const { 
+      name, 
+      type, 
+      description, 
+      interestRate, 
+      minBalance, 
+      maxBalance, 
+      monthlyFee, 
+      penaltyRate, 
+      graceDays,
+      loanType,
+      // Campos específicos para planes de ahorro
+      monthlyAmount,
+      billingDay,
+      penaltyAmount,
+      startMonth,
+      endMonth,
+      planYear
+    } = req.body;
+    
+    console.log('📥 Datos recibidos en createProduct:', req.body);
     
     if (!name || !type) {
       return res.status(400).json({ success: false, error: 'El nombre y el tipo son obligatorios.' });
@@ -87,6 +123,14 @@ export async function createProduct(req: Request, res: Response) {
         monthlyFee,
         penaltyRate,
         graceDays,
+        loanType,
+        // Campos específicos para planes de ahorro
+        monthlyAmount,
+        billingDay,
+        penaltyAmount,
+        startMonth,
+        endMonth,
+        planYear,
         isActive: true,
       },
       select: {
@@ -100,6 +144,14 @@ export async function createProduct(req: Request, res: Response) {
         monthlyFee: true,
         penaltyRate: true,
         graceDays: true,
+        loanType: true,
+        // Campos específicos para planes de ahorro
+        monthlyAmount: true,
+        billingDay: true,
+        penaltyAmount: true,
+        startMonth: true,
+        endMonth: true,
+        planYear: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -117,7 +169,28 @@ export async function createProduct(req: Request, res: Response) {
 // Actualizar producto
 export async function updateProduct(req: Request, res: Response) {
   try {
-    const { name, type, description, interestRate, minBalance, maxBalance, monthlyFee, penaltyRate, graceDays, isActive } = req.body;
+    const { 
+      name, 
+      type, 
+      description, 
+      interestRate, 
+      minBalance, 
+      maxBalance, 
+      monthlyFee, 
+      penaltyRate, 
+      graceDays, 
+      isActive,
+      loanType,
+      // Campos específicos para planes de ahorro
+      monthlyAmount,
+      billingDay,
+      penaltyAmount,
+      startMonth,
+      endMonth,
+      planYear
+    } = req.body;
+
+    console.log('📥 Datos recibidos en updateProduct:', req.body);
 
     const product = await prisma.product.update({
       where: { id: parseInt(req.params.id, 10) },
@@ -132,6 +205,14 @@ export async function updateProduct(req: Request, res: Response) {
         penaltyRate,
         graceDays,
         isActive,
+        loanType,
+        // Campos específicos para planes de ahorro
+        monthlyAmount,
+        billingDay,
+        penaltyAmount,
+        startMonth,
+        endMonth,
+        planYear,
       },
       select: {
         id: true,
@@ -144,6 +225,14 @@ export async function updateProduct(req: Request, res: Response) {
         monthlyFee: true,
         penaltyRate: true,
         graceDays: true,
+        loanType: true,
+        // Campos específicos para planes de ahorro
+        monthlyAmount: true,
+        billingDay: true,
+        penaltyAmount: true,
+        startMonth: true,
+        endMonth: true,
+        planYear: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,

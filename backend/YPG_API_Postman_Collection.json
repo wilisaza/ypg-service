@@ -1,0 +1,344 @@
+{
+  "info": {
+    "name": "YPG Service API",
+    "description": "API para Sistema de Gestión Financiera YPG - Préstamos de Capital Variable",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000/api",
+      "type": "string"
+    },
+    {
+      "key": "auth_token", 
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "account_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🔐 Autenticación",
+      "item": [
+        {
+          "name": "Login Usuario",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('auth_token', response.token);",
+                  "    pm.test('Token obtenido correctamente', function () {",
+                  "        pm.expect(response.token).to.not.be.undefined;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"test_user\",\n  \"password\": \"test123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Autenticar usuario y obtener token JWT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Préstamos Capital Variable",
+      "item": [
+        {
+          "name": "Crear Préstamo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('account_id', response.data.accountId);",
+                  "    pm.test('Préstamo creado exitosamente', function () {",
+                  "        pm.expect(response.success).to.be.true;",
+                  "        pm.expect(response.data.accountId).to.not.be.undefined;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"productId\": 1,\n  \"principalAmount\": 500000,\n  \"termMonths\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/loans/variable-capital",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "variable-capital"]
+            },
+            "description": "Crear un nuevo préstamo de capital variable"
+          }
+        },
+        {
+          "name": "Consultar Estado del Préstamo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/loans/{{account_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "{{account_id}}", "status"]
+            },
+            "description": "Obtener estado actual del préstamo"
+          }
+        },
+        {
+          "name": "Procesar Pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentAmount\": 100000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/loans/{{account_id}}/payment",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "{{account_id}}", "payment"]
+            },
+            "description": "Procesar pago al préstamo con priorización automática"
+          }
+        }
+      ]
+    },
+    {
+      "name": "⚙️ Administración Cron Jobs",
+      "item": [
+        {
+          "name": "Estado de Jobs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/loans/cron/status",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "cron", "status"]
+            },
+            "description": "Obtener estado de todos los jobs de cron"
+          }
+        },
+        {
+          "name": "Ejecutar Intereses Manualmente",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/loans/cron/run-interest-now",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "cron", "run-interest-now"]
+            },
+            "description": "Ejecutar job de intereses inmediatamente"
+          }
+        },
+        {
+          "name": "Generar Intereses Diarios",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/loans/generate-daily-interest",
+              "host": ["{{base_url}}"],
+              "path": ["loans", "generate-daily-interest"]
+            },
+            "description": "Generar intereses diarios para todos los préstamos"
+          }
+        }
+      ]
+    },
+    {
+      "name": "👥 Gestión de Usuarios",
+      "item": [
+        {
+          "name": "Listar Usuarios",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "Obtener lista de todos los usuarios"
+          }
+        },
+        {
+          "name": "Crear Usuario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"nuevo_usuario\",\n  \"password\": \"password123\",\n  \"fullName\": \"Usuario Nuevo\",\n  \"email\": \"nuevo@example.com\",\n  \"role\": \"USER\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "Crear nuevo usuario en el sistema"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏭 Gestión de Productos",
+      "item": [
+        {
+          "name": "Listar Productos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": ["{{base_url}}"],
+              "path": ["products"]
+            },
+            "description": "Obtener todos los productos financieros"
+          }
+        },
+        {
+          "name": "Crear Producto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Préstamo Capital Variable\",\n  \"type\": \"LOAN\",\n  \"loanType\": \"VARIABLE_CAPITAL\",\n  \"description\": \"Préstamo con interés mensual fijo\",\n  \"interestRate\": 0.24,\n  \"monthlyFee\": 50000,\n  \"penaltyRate\": 0.02,\n  \"graceDays\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": ["{{base_url}}"],
+              "path": ["products"]
+            },
+            "description": "Crear nuevo producto financiero"
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Gestión de Cuentas",
+      "item": [
+        {
+          "name": "Cuentas del Usuario",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/accounts/user/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["accounts", "user", "{{user_id}}"]
+            },
+            "description": "Obtener todas las cuentas de un usuario"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💳 Transacciones",
+      "item": [
+        {
+          "name": "Historial de Transacciones",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/transactions/account/{{account_id}}?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["transactions", "account", "{{account_id}}"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Obtener historial de transacciones de una cuenta"
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Configuración automática de autenticación",
+          "const token = pm.collectionVariables.get('auth_token');",
+          "if (token && !pm.request.headers.has('Authorization')) {",
+          "    pm.request.headers.add({",
+          "        key: 'Authorization',",
+          "        value: 'Bearer ' + token",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ]
+}

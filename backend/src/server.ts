@@ -1,54 +1,42 @@
 
 import 'dotenv/config';
-// buildApp y CronJobService se importan dinámicamente en main
+import buildApp from './app.js';
+import { cronManager } from './services/cronJobManager.js';
 
 const PORT = process.env.PORT || 4000;
 
 async function main() {
-  console.log('[server] Iniciando servidor...');
-  console.log(`[server] DATABASE_URL cargada: ${process.env.DATABASE_URL ? 'sí' : 'no'}`);
-  let prismaClient;
+  console.log('🚀 Iniciando servidor YPG...');
+  
   try {
-    console.log('[server] Importando prismaClient dinámicamente...');
-    const mod = await import('./models/prismaClient.js');
-    prismaClient = mod.default;
-    console.log('[server] prismaClient importado correctamente');
-  } catch (importError) {
-    console.error('❌ Error al importar prismaClient:', importError);
+    // Inicializar aplicación
+    const app = buildApp();
+    
+    // Inicializar jobs de cron
+    cronManager.startAllJobs();
+    
+    // Iniciar servidor
+    app.listen(PORT, () => {
+      console.log(`✅ Servidor corriendo en puerto ${PORT}`);
+      console.log('✅ Sistema de préstamos y cron jobs activos');
+    });
+    
+  } catch (error) {
+    console.error('❌ Error iniciando servidor:', error);
     process.exit(1);
   }
-  try {
-    console.log('[server] Intentando conectar a la base de datos...');
-    await prismaClient.$connect();
-    console.log('✅ Conexión a base de datos exitosa');
-  } catch (connError) {
-    console.error('❌ Error al conectar a la base de datos:', connError);
-    process.exit(1);
-  }
-  // Importar dinámicamente buildApp y servicios de cron
-  const [{ default: buildApp }, { cronManager }] = await Promise.all([
-    import('./app.js'),
-    import('./services/cronJobManager.js')
-  ]);
-  
-  // Inicializar aplicación
-  const app = buildApp();
-  
-  // Inicializar jobs de cron
-  cronManager.startAllJobs();
-  
-  app.listen(PORT, () => {
-    console.log(`🚀 Servidor Express corriendo en el puerto ${PORT}`);
-    console.log('🚀 Sistema completo iniciado con jobs de cron optimizados');
-  });
 }
 
-// Capturar cualquier rechazo no manejado
+// Manejo de errores no capturados
 process.on('unhandledRejection', (reason) => {
   console.error('❌ Rechazo no manejado:', reason);
-});
-// Ejecutar arranque con manejo de errores
-main().catch((e) => {
-  console.error('❌ Error en la función main():', e);
   process.exit(1);
 });
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Excepción no capturada:', error);
+  process.exit(1);
+});
+
+// Iniciar servidor
+main();

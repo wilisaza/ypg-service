@@ -46,6 +46,15 @@ model Product {
   penaltyRate  Float?      // Tasa de multa por atraso (ej: 2% sobre la cuota)
   graceDays    Int?        @default(5)
   loanType     LoanType?   // Tipo de modalidad de crédito
+  
+  // Campos específicos para planes de ahorro
+  monthlyAmount    Float?     // Monto mensual fijo del plan de ahorro
+  billingDay       Int?       // Día del mes para cobro (1-30)
+  penaltyAmount    Float?     // Multa fija en pesos por atraso
+  startMonth       Int?       // Mes de inicio del plan (1-12)
+  endMonth         Int?       // Mes de fin del plan (1-12)
+  planYear         Int?       // Año del plan de ahorro
+  
   accounts     Account[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
