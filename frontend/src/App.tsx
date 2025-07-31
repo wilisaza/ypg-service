@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import UserDashboard from './pages/UserDashboard';
 import AdminLayout from './pages/AdminLayout';
+import UserManagement from './pages/UserManagement';
+import ProductManagement from './pages/ProductManagement';
+import ProductAccountManagement from './pages/ProductAccountManagement';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { getTheme } from './theme';
 import { ThemeContext } from './themeContext';
@@ -52,9 +55,9 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login onLogin={setUser} />} />
             <Route path="/dashboard/ADMIN" element={user && user.role === 'ADMIN' ? <AdminLayout username={user.username} onLogout={handleLogout} /> : <Navigate to="/login" replace />}>
-              <Route path="users" />
-              <Route path="products" />
-              <Route path="product-accounts" />
+              <Route path="users" element={<UserManagement />} />
+              <Route path="products" element={<ProductManagement />} />
+              <Route path="product-accounts" element={<ProductAccountManagement />} />
             </Route>
             <Route path="/dashboard/USER" element={user && user.role === 'USER' ? <UserDashboard username={user.username} onLogout={handleLogout} /> : <Navigate to="/login" replace />} />
             <Route path="/" element={user ? <Navigate to={`/dashboard/${user.role}`} replace /> : <Navigate to="/login" replace />} />

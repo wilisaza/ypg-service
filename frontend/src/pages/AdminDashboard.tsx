@@ -31,7 +31,7 @@ export default function AdminDashboard({ username, onLogout }: AdminDashboardPro
     handleClose();
     if (option === 'Gestión de Usuarios') navigate('/dashboard/ADMIN/users');
     if (option === 'Gestión de Productos') navigate('/dashboard/ADMIN/products');
-    if (option === 'Gestión de Cuentas') navigate('/dashboard/ADMIN/accounts');
+    if (option === 'Gestión de Cuentas') navigate('/dashboard/ADMIN/product-accounts');
     // Aquí puedes agregar más opciones de menú
   };
   return (

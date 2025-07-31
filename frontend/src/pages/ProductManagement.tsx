@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Button, IconButton, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Tooltip,
-  FormControl, InputLabel, Select, MenuItem, CircularProgress
+  FormControl, InputLabel, Select, MenuItem, CircularProgress, Chip, Switch, FormControlLabel
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -11,27 +11,36 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 
 interface Product {
-  id: string;
+  id: number;
   name: string;
-  type: 'AHORRO' | 'PRESTAMO';
+  type: 'SAVINGS' | 'LOAN';
+  loanType?: 'FRENCH_SYSTEM' | 'VARIABLE_CAPITAL';
   description?: string;
-  
-  // Campos específicos para AHORRO
-  monthlyAmount?: number;
-  startMonth?: number;
-  startYear?: number;
-  endMonth?: number;
-  endYear?: number;
-  penaltyAmount?: number;
+  interestRate?: number;
+  minBalance?: number;
+  maxBalance?: number;
+  monthlyFee?: number;
+  penaltyRate?: number;
   graceDays?: number;
-  
-  // Campos específicos para PRESTAMO
-  defaultInterest?: number;
-  termMonths?: number;
-  
+  // Nuevos campos para planes de ahorro
+  monthlyAmount?: number;
+  billingDay?: number;
+  penaltyAmount?: number;
+  startMonth?: number;
+  endMonth?: number;
+  planYear?: number;
+  isActive: boolean;
+  activeAccounts?: number;
   createdAt: string;
   updatedAt: string;
 }
+
+// Traducciones para facilitar el uso
+const monthLabels: Record<number, string> = {
+  1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+  5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+  9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+};
 
 const apiUrl = import.meta.env.VITE_API_URL || '/api';
 
@@ -42,21 +51,82 @@ export default function ProductManagement() {
   const [open, setOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
-  const [form, setForm] = useState<Partial<Product>>({ 
-    name: '', 
-    type: 'AHORRO', 
+  const [form, setForm] = useState<Partial<Product>>({
+    name: '',
+    type: 'SAVINGS',
+    loanType: undefined,
     description: '',
-    monthlyAmount: undefined,
-    startMonth: undefined,
-    startYear: undefined,
-    endMonth: undefined,
-    endYear: undefined,
-    penaltyAmount: undefined,
-    graceDays: 5,
-    defaultInterest: undefined,
-    termMonths: undefined
+    interestRate: 0,
+    minBalance: 0,
+    maxBalance: 0,
+    monthlyFee: 0,
+    penaltyRate: 0,
+    graceDays: 0,
+    // Nuevos campos para planes de ahorro
+    monthlyAmount: 0,
+    billingDay: 1,
+    penaltyAmount: 0,
+    startMonth: 1,
+    endMonth: 12,
+    planYear: new Date().getFullYear(),
+    isActive: true
   });
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Función para validar campos obligatorios
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    // Campos obligatorios básicos
+    if (!form.name?.trim()) {
+      errors.name = 'El nombre es obligatorio';
+    }
+    
+    if (!form.type) {
+      errors.type = 'El tipo de producto es obligatorio';
+    }
+    
+    // Validaciones específicas para préstamos
+    if (form.type === 'LOAN') {
+      if (!form.loanType) {
+        errors.loanType = 'El tipo de préstamo es obligatorio';
+      }
+    }
+    
+    // Validaciones específicas para planes de ahorro
+    if (form.type === 'SAVINGS') {
+      if (form.monthlyAmount && form.monthlyAmount <= 0) {
+        errors.monthlyAmount = 'La cuota mensual debe ser mayor a 0';
+      }
+      
+      if (form.billingDay && (form.billingDay < 1 || form.billingDay > 30)) {
+        errors.billingDay = 'El día de cobro debe estar entre 1 y 30';
+      }
+      
+      if (form.startMonth && form.endMonth && form.startMonth > form.endMonth) {
+        errors.startMonth = 'El mes de inicio no puede ser posterior al mes de fin';
+        errors.endMonth = 'El mes de fin no puede ser anterior al mes de inicio';
+      }
+      
+      if (form.planYear && form.planYear < new Date().getFullYear()) {
+        errors.planYear = 'El año del plan no puede ser anterior al año actual';
+      }
+    }
+    
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Función para verificar si un campo tiene error
+  const hasError = (fieldName: string): boolean => {
+    return fieldName in fieldErrors;
+  };
+
+  // Función para obtener el mensaje de error de un campo
+  const getErrorMessage = (fieldName: string): string => {
+    return fieldErrors[fieldName] || '';
+  };
 
   // Funciones para formatear números con separadores de miles
   const formatCurrency = (value: number): string => {
@@ -64,6 +134,10 @@ export default function ProductManagement() {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(value);
+  };
+
+  const formatPercentage = (rate: number): string => {
+    return `${(rate * 100).toFixed(2)}%`;
   };
 
   const parseCurrency = (value: string): number => {
@@ -93,8 +167,8 @@ export default function ProductManagement() {
     }
   }, [navigate]);
 
-  useEffect(() => { 
-    fetchProducts(); 
+  useEffect(() => {
+    fetchProducts();
   }, [fetchProducts]);
 
   const handleOpen = (product?: Product) => {
@@ -102,91 +176,167 @@ export default function ProductManagement() {
     if (product) {
       setForm({
         name: product.name || '',
-        type: product.type || 'AHORRO',
+        type: product.type || 'SAVINGS',
+        loanType: product.loanType,
         description: product.description || '',
-        monthlyAmount: product.monthlyAmount,
-        startMonth: product.startMonth,
-        startYear: product.startYear,
-        endMonth: product.endMonth,
-        endYear: product.endYear,
-        penaltyAmount: product.penaltyAmount,
-        graceDays: product.graceDays || 5,
-        defaultInterest: product.defaultInterest,
-        termMonths: product.termMonths
+        interestRate: product.interestRate ? product.interestRate * 100 : 0, // Convert to percentage
+        minBalance: product.minBalance || 0,
+        maxBalance: product.maxBalance || 0,
+        monthlyFee: product.monthlyFee || 0,
+        penaltyRate: product.penaltyRate ? product.penaltyRate * 100 : 0, // Convert to percentage
+        graceDays: product.graceDays || 0,
+        // Nuevos campos para planes de ahorro
+        monthlyAmount: product.monthlyAmount || 0,
+        billingDay: product.billingDay || 1,
+        penaltyAmount: product.penaltyAmount || 0,
+        startMonth: product.startMonth || 1,
+        endMonth: product.endMonth || 12,
+        planYear: product.planYear || new Date().getFullYear(),
+        isActive: product.isActive
       });
     } else {
-      setForm({ 
-        name: '', 
-        type: 'AHORRO', 
+      setForm({
+        name: '',
+        type: 'SAVINGS',
+        loanType: undefined,
         description: '',
-        monthlyAmount: undefined,
-        startMonth: undefined,
-        startYear: undefined,
-        endMonth: undefined,
-        endYear: undefined,
-        penaltyAmount: undefined,
-        graceDays: 5,
-        defaultInterest: undefined,
-        termMonths: undefined
+        interestRate: 0,
+        minBalance: 0,
+        maxBalance: 0,
+        monthlyFee: 0,
+        penaltyRate: 0,
+        graceDays: 0,
+        // Nuevos campos para planes de ahorro
+        monthlyAmount: 0,
+        billingDay: 1,
+        penaltyAmount: 0,
+        startMonth: 1,
+        endMonth: 12,
+        planYear: new Date().getFullYear(),
+        isActive: true
       });
     }
     setOpen(true);
     setError('');
+    setFieldErrors({}); // Limpiar errores de campos
   };
 
   const handleClose = () => {
     setOpen(false);
     setEditingProduct(null);
-    setForm({ 
-      name: '', 
-      type: 'AHORRO', 
+    setForm({
+      name: '',
+      type: 'SAVINGS',
+      loanType: undefined,
       description: '',
-      monthlyAmount: undefined,
-      startMonth: undefined,
-      startYear: undefined,
-      endMonth: undefined,
-      endYear: undefined,
-      penaltyAmount: undefined,
-      graceDays: 5,
-      defaultInterest: undefined,
-      termMonths: undefined
+      interestRate: 0,
+      minBalance: 0,
+      maxBalance: 0,
+      monthlyFee: 0,
+      penaltyRate: 0,
+      graceDays: 0,
+      // Nuevos campos para planes de ahorro
+      monthlyAmount: 0,
+      billingDay: 1,
+      penaltyAmount: 0,
+      startMonth: 1,
+      endMonth: 12,
+      planYear: new Date().getFullYear(),
+      isActive: true
     });
     setError('');
+    setFieldErrors({}); // Limpiar errores de campos
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const parsedValue = ['monthlyAmount', 'startMonth', 'startYear', 'endMonth', 'endYear', 'penaltyAmount', 'graceDays', 'defaultInterest', 'termMonths'].includes(name)
-      ? value === '' ? undefined : Number(value)
+    const numericFields = ['interestRate', 'minBalance', 'maxBalance', 'monthlyFee', 'penaltyRate', 'graceDays', 
+                          'monthlyAmount', 'billingDay', 'penaltyAmount', 'startMonth', 'endMonth', 'planYear'];
+    const parsedValue = numericFields.includes(name)
+      ? value === '' ? 0 : Number(value)
       : value;
     setForm({ ...form, [name]: parsedValue });
   };
 
-  const handleSelectChange = (name: string, value: string) => {
+  const handleSelectChange = (name: string, value: string | number) => {
     setForm({ ...form, [name]: value });
   };
 
-  const handleMonthlyAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCurrencyChange = (field: keyof Product) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     const numericValue = parseCurrency(value);
-    setForm({ ...form, monthlyAmount: numericValue });
-  };
-
-  const handlePenaltyAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    const numericValue = parseCurrency(value);
-    setForm({ ...form, penaltyAmount: numericValue });
+    setForm({ ...form, [field]: numericValue });
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.type) {
-      setError('Completa todos los campos obligatorios.');
+    // Limpiar errores previos
+    setError('');
+    setFieldErrors({});
+    
+    // Validar formulario
+    if (!validateForm()) {
+      setError('Por favor, corrige los errores marcados en rojo antes de continuar.');
       return;
     }
+
     const token = localStorage.getItem('token');
     setSubmitLoading(true);
     try {
-      const payload = { ...form };
+      // Prepare payload
+      const payload: {
+        name: string;
+        type: string;
+        description: string;
+        isActive: boolean;
+        loanType?: string;
+        interestRate?: number;
+        penaltyRate?: number;
+        graceDays?: number;
+        minBalance?: number;
+        maxBalance?: number;
+        monthlyFee?: number;
+        // Nuevos campos para planes de ahorro
+        monthlyAmount?: number;
+        billingDay?: number;
+        penaltyAmount?: number;
+        startMonth?: number;
+        endMonth?: number;
+        planYear?: number;
+      } = {
+        name: form.name,
+        type: form.type,
+        description: form.description || '',
+        isActive: form.isActive ?? true
+      };
+
+      // Add type-specific fields
+      if (form.type === 'LOAN') {
+        payload.loanType = form.loanType;
+        if (form.interestRate) payload.interestRate = form.interestRate / 100; // Convert percentage to decimal
+        if (form.penaltyRate) payload.penaltyRate = form.penaltyRate / 100;
+        if (form.graceDays) payload.graceDays = form.graceDays;
+        // Para préstamos de capital variable, monthlyFee es un valor fijo en pesos
+        if (form.loanType === 'VARIABLE_CAPITAL' && form.monthlyFee) {
+          payload.monthlyFee = form.monthlyFee;
+        }
+      } else if (form.type === 'SAVINGS') {
+        if (form.interestRate) payload.interestRate = form.interestRate / 100;
+        if (form.minBalance) payload.minBalance = form.minBalance;
+        if (form.maxBalance) payload.maxBalance = form.maxBalance;
+        if (form.monthlyFee) payload.monthlyFee = form.monthlyFee;
+        if (form.penaltyRate) payload.penaltyRate = form.penaltyRate / 100;
+        if (form.graceDays) payload.graceDays = form.graceDays;
+        // Nuevos campos específicos para planes de ahorro
+        if (form.monthlyAmount !== undefined && form.monthlyAmount !== null) payload.monthlyAmount = form.monthlyAmount;
+        if (form.billingDay !== undefined && form.billingDay !== null) payload.billingDay = form.billingDay;
+        if (form.penaltyAmount !== undefined && form.penaltyAmount !== null) payload.penaltyAmount = form.penaltyAmount;
+        if (form.startMonth !== undefined && form.startMonth !== null) payload.startMonth = form.startMonth;
+        if (form.endMonth !== undefined && form.endMonth !== null) payload.endMonth = form.endMonth;
+        if (form.planYear !== undefined && form.planYear !== null) payload.planYear = form.planYear;
+      }
+
+      console.log('📤 Payload enviado al backend:', payload);
+
       const res = await fetch(
         `${apiUrl}/products${editingProduct ? `/${editingProduct.id}` : ''}`,
         {
@@ -201,17 +351,20 @@ export default function ProductManagement() {
         navigate('/login');
         return;
       }
-      if (!res.ok) throw new Error('Error al guardar producto');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al guardar producto');
+      }
       handleClose();
       fetchProducts();
-    } catch {
-      setError('Error al guardar producto');
+    } catch (err) {
+      setError(`Error al guardar producto: ${err instanceof Error ? err.message : 'Error desconocido'}`);
     } finally {
       setSubmitLoading(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => {
     const token = localStorage.getItem('token');
     if (!window.confirm('¿Eliminar este producto?')) return;
     try {
@@ -231,7 +384,7 @@ export default function ProductManagement() {
       }
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        window.alert(`Error al eliminar producto: ${errorData.error || 'Error desconocido'}`);
+        window.alert(`Error al eliminar producto: ${errorData.message || 'Error desconocido'}`);
         return;
       }
       fetchProducts();
@@ -239,6 +392,22 @@ export default function ProductManagement() {
     } catch (error) {
       console.error('Error de conexión:', error);
       window.alert('Error al conectar con el servidor.');
+    }
+  };
+
+  const getProductTypeLabel = (type: string) => {
+    switch (type) {
+      case 'SAVINGS': return 'Ahorro';
+      case 'LOAN': return 'Préstamo';
+      default: return type;
+    }
+  };
+
+  const getLoanTypeLabel = (loanType?: string) => {
+    switch (loanType) {
+      case 'FRENCH_SYSTEM': return 'Sistema Francés';
+      case 'VARIABLE_CAPITAL': return 'Capital Variable';
+      default: return '';
     }
   };
 
@@ -250,16 +419,12 @@ export default function ProductManagement() {
       </Button>
       {loading ? (
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="24" cy="24" r="20" stroke="#1976d2" strokeWidth="4" strokeDasharray="31.4 31.4" strokeLinecap="round">
-              <animateTransform attributeName="transform" type="rotate" repeatCount="indefinite" dur="1s" from="0 24 24" to="360 24 24" />
-            </circle>
-          </svg>
+          <CircularProgress />
         </Box>
       ) : (
-        <TableContainer 
-          component={Paper} 
-          sx={{ 
+        <TableContainer
+          component={Paper}
+          sx={{
             maxHeight: 'calc(100vh - 180px)',
             overflow: 'auto'
           }}
@@ -269,6 +434,7 @@ export default function ProductManagement() {
               <TableRow>
                 <TableCell sx={{ minWidth: 180 }}>Nombre</TableCell>
                 <TableCell sx={{ minWidth: 100 }}>Tipo</TableCell>
+                <TableCell sx={{ minWidth: 120 }}>Estado</TableCell>
                 <TableCell sx={{ minWidth: 200 }}>Descripción</TableCell>
                 <TableCell sx={{ minWidth: 200 }}>Detalles Específicos</TableCell>
                 <TableCell align="right" sx={{ minWidth: 120 }}>Acciones</TableCell>
@@ -278,25 +444,54 @@ export default function ProductManagement() {
               {products.map(product => (
                 <TableRow key={product.id}>
                   <TableCell>{product.name}</TableCell>
-                  <TableCell>{product.type}</TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={getProductTypeLabel(product.type)} 
+                      color={product.type === 'LOAN' ? 'primary' : 'secondary'}
+                      size="small"
+                    />
+                    {product.loanType && (
+                      <Chip 
+                        label={getLoanTypeLabel(product.loanType)} 
+                        variant="outlined"
+                        size="small"
+                        sx={{ ml: 1 }}
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={product.isActive ? 'Activo' : 'Inactivo'} 
+                      color={product.isActive ? 'success' : 'default'}
+                      size="small"
+                    />
+                  </TableCell>
                   <TableCell>{product.description}</TableCell>
                   <TableCell>
-                    {product.type === 'AHORRO' ? (
+                    {product.type === 'SAVINGS' ? (
                       <div>
-                        {product.monthlyAmount && <div>Monto mensual: ${formatCurrency(product.monthlyAmount)}</div>}
-                        {product.startMonth && product.startYear && (
-                          <div>Inicio: {product.startMonth}/{product.startYear}</div>
-                        )}
-                        {product.endMonth && product.endYear && (
-                          <div>Fin: {product.endMonth}/{product.endYear}</div>
-                        )}
+                        {product.monthlyAmount && <div>Cuota mensual: ${formatCurrency(product.monthlyAmount)}</div>}
+                        {product.billingDay && <div>Día de cobro: {product.billingDay}</div>}
                         {product.penaltyAmount && <div>Multa: ${formatCurrency(product.penaltyAmount)}</div>}
-                        {product.graceDays && <div>Días gracia: {product.graceDays}</div>}
+                        {product.startMonth && product.endMonth && (
+                          <div>Período: {monthLabels[product.startMonth]} - {monthLabels[product.endMonth]}</div>
+                        )}
+                        {product.planYear && <div>Año: {product.planYear}</div>}
+                        {product.graceDays && <div>Días de gracia: {product.graceDays}</div>}
+                        {product.interestRate && <div>Tasa de interés: {formatPercentage(product.interestRate)}</div>}
+                        {product.minBalance && <div>Saldo mínimo: ${formatCurrency(product.minBalance)}</div>}
+                        {product.maxBalance && <div>Saldo máximo: ${formatCurrency(product.maxBalance)}</div>}
+                        {product.monthlyFee && <div>Cuota manejo: ${formatCurrency(product.monthlyFee)}</div>}
+                        {product.penaltyRate && <div>Tasa multa (%): {formatPercentage(product.penaltyRate)}</div>}
                       </div>
                     ) : (
                       <div>
-                        {product.defaultInterest && <div>Interés: {product.defaultInterest}%</div>}
-                        {product.termMonths && <div>Plazo: {product.termMonths} meses</div>}
+                        {product.interestRate && <div>Tasa de interés: {formatPercentage(product.interestRate)}</div>}
+                        {product.loanType === 'VARIABLE_CAPITAL' && product.monthlyFee && (
+                          <div>Multa mensual: ${formatCurrency(product.monthlyFee)}</div>
+                        )}
+                        {product.penaltyRate && <div>Tasa de multa: {formatPercentage(product.penaltyRate)}</div>}
+                        {product.graceDays && <div>Días de gracia: {product.graceDays}</div>}
                       </div>
                     )}
                   </TableCell>
@@ -331,18 +526,56 @@ export default function ProductManagement() {
               onChange={handleChange}
               required
               fullWidth
+              error={hasError('name')}
+              helperText={getErrorMessage('name') || 'Nombre único del producto'}
             />
-            <FormControl fullWidth>
+            <FormControl fullWidth error={hasError('type')}>
               <InputLabel>Tipo *</InputLabel>
               <Select
-                value={form.type || 'AHORRO'}
+                value={form.type || 'SAVINGS'}
                 label="Tipo *"
                 onChange={(e) => handleSelectChange('type', e.target.value)}
               >
-                <MenuItem value="AHORRO">AHORRO</MenuItem>
-                <MenuItem value="PRESTAMO">PRESTAMO</MenuItem>
+                <MenuItem value="SAVINGS">Plan de Ahorro</MenuItem>
+                <MenuItem value="LOAN">Préstamo</MenuItem>
               </Select>
+              {hasError('type') && (
+                <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 2 }}>
+                  {getErrorMessage('type')}
+                </Typography>
+              )}
             </FormControl>
+
+            {/* Loan Type Selection */}
+            {form.type === 'LOAN' && (
+              <FormControl fullWidth error={hasError('loanType')}>
+                <InputLabel>Tipo de Préstamo *</InputLabel>
+                <Select
+                  value={form.loanType || ''}
+                  label="Tipo de Préstamo *"
+                  onChange={(e) => handleSelectChange('loanType', e.target.value)}
+                >
+                  <MenuItem value="FRENCH_SYSTEM">Sistema Francés</MenuItem>
+                  <MenuItem value="VARIABLE_CAPITAL">Capital Variable</MenuItem>
+                </Select>
+                {hasError('loanType') && (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 2 }}>
+                    {getErrorMessage('loanType')}
+                  </Typography>
+                )}
+              </FormControl>
+            )}
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={form.isActive || false}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                />
+              }
+              label="Producto Activo"
+            />
+
             <TextField
               label="Descripción"
               name="description"
@@ -355,98 +588,189 @@ export default function ProductManagement() {
             />
           </Box>
 
-          {/* Campos específicos para AHORRO */}
-          {form.type === 'AHORRO' && (
+          {/* Common Fields */}
+          <Box mt={3}>
+            <Typography variant="h6" gutterBottom>Configuración General</Typography>
+            <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2}>
+              <TextField
+                label="Tasa de Interés (%)"
+                name="interestRate"
+                type="number"
+                value={form.interestRate || ''}
+                onChange={handleChange}
+                fullWidth
+                inputProps={{ min: 0, max: 100, step: 0.01 }}
+              />
+              <TextField
+                label="Tasa de Multa (%)"
+                name="penaltyRate"
+                type="number"
+                value={form.penaltyRate || ''}
+                onChange={handleChange}
+                fullWidth
+                inputProps={{ min: 0, max: 100, step: 0.01 }}
+              />
+              <TextField
+                label="Días de Gracia"
+                name="graceDays"
+                type="number"
+                value={form.graceDays || ''}
+                onChange={handleChange}
+                fullWidth
+                inputProps={{ min: 0, max: 30 }}
+                helperText="Días antes de aplicar multa"
+              />
+            </Box>
+          </Box>
+
+          {/* Specific Fields for VARIABLE_CAPITAL Loans */}
+          {form.type === 'LOAN' && form.loanType === 'VARIABLE_CAPITAL' && (
             <Box mt={3}>
-              <Typography variant="h6" gutterBottom>Configuración de Ahorro</Typography>
+              <Typography variant="h6" gutterBottom>Configuración de Préstamo Capital Variable</Typography>
               <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2}>
                 <TextField
-                  label="Monto Mensual"
-                  name="monthlyAmount"
-                  value={form.monthlyAmount ? formatCurrency(form.monthlyAmount) : ''}
-                  onChange={handleMonthlyAmountChange}
+                  label="Multa Mensual (Valor Fijo)"
+                  name="monthlyFee"
+                  value={form.monthlyFee ? formatCurrency(form.monthlyFee) : ''}
+                  onChange={handleCurrencyChange('monthlyFee')}
                   fullWidth
                   placeholder="0"
                   inputProps={{
                     inputMode: 'numeric',
                     pattern: '[0-9,]*'
                   }}
-                />
-                <TextField
-                  label="Mes de Inicio"
-                  name="startMonth"
-                  type="number"
-                  value={form.startMonth || ''}
-                  onChange={handleChange}
-                  fullWidth
-                  inputProps={{ min: 1, max: 12 }}
-                />
-                <TextField
-                  label="Año de Inicio"
-                  name="startYear"
-                  type="number"
-                  value={form.startYear || ''}
-                  onChange={handleChange}
-                  fullWidth
-                  inputProps={{ min: 2024 }}
-                />
-                <TextField
-                  label="Mes Fin"
-                  name="endMonth"
-                  type="number"
-                  value={form.endMonth || ''}
-                  onChange={handleChange}
-                  fullWidth
-                  inputProps={{ min: 1, max: 12 }}
-                />
-                <TextField
-                  label="Multa por Pago Tardío"
-                  name="penaltyAmount"
-                  value={form.penaltyAmount ? formatCurrency(form.penaltyAmount) : ''}
-                  onChange={handlePenaltyAmountChange}
-                  fullWidth
-                  placeholder="0"
-                  inputProps={{
-                    inputMode: 'numeric',
-                    pattern: '[0-9,]*'
-                  }}
-                />
-                <TextField
-                  label="Días de Gracia"
-                  name="graceDays"
-                  type="number"
-                  value={form.graceDays || ''}
-                  onChange={handleChange}
-                  fullWidth
-                  inputProps={{ min: 1, max: 30 }}
-                  helperText="Días antes de aplicar multa"
+                  helperText="Valor fijo en pesos que se cobra mensualmente"
                 />
               </Box>
             </Box>
           )}
 
-          {/* Campos específicos para PRESTAMO */}
-          {form.type === 'PRESTAMO' && (
+          {/* Specific Fields for SAVINGS */}
+          {form.type === 'SAVINGS' && (
             <Box mt={3}>
-              <Typography variant="h6" gutterBottom>Configuración de Préstamo</Typography>
+              <Typography variant="h6" gutterBottom>Configuración de Plan de Ahorro</Typography>
               <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: '1fr 1fr' }} gap={2}>
+                {/* Nuevos campos específicos para planes de ahorro */}
                 <TextField
-                  label="Interés por Defecto (%)"
-                  name="defaultInterest"
-                  type="number"
-                  value={form.defaultInterest || ''}
-                  onChange={handleChange}
+                  label="Cuota Mensual del Plan"
+                  name="monthlyAmount"
+                  value={form.monthlyAmount ? formatCurrency(form.monthlyAmount) : ''}
+                  onChange={handleCurrencyChange('monthlyAmount')}
                   fullWidth
-                  inputProps={{ min: 0, max: 100, step: 0.1 }}
+                  placeholder="50000"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                  error={hasError('monthlyAmount')}
+                  helperText={getErrorMessage('monthlyAmount') || 'Monto fijo mensual del plan de ahorro'}
                 />
                 <TextField
-                  label="Plazo por Defecto (meses)"
-                  name="termMonths"
+                  label="Día de Cobro"
+                  name="billingDay"
                   type="number"
-                  value={form.termMonths || ''}
+                  value={form.billingDay || ''}
                   onChange={handleChange}
                   fullWidth
-                  inputProps={{ min: 1, max: 360 }}
+                  inputProps={{ min: 1, max: 30 }}
+                  error={hasError('billingDay')}
+                  helperText={getErrorMessage('billingDay') || 'Día del mes para el cobro (1-30)'}
+                />
+                <TextField
+                  label="Multa por Atraso"
+                  name="penaltyAmount"
+                  value={form.penaltyAmount ? formatCurrency(form.penaltyAmount) : ''}
+                  onChange={handleCurrencyChange('penaltyAmount')}
+                  fullWidth
+                  placeholder="10000"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                  error={hasError('penaltyAmount')}
+                  helperText={getErrorMessage('penaltyAmount') || 'Valor fijo en pesos por atraso'}
+                />
+                <FormControl fullWidth error={hasError('startMonth')}>
+                  <InputLabel>Mes de Inicio</InputLabel>
+                  <Select
+                    value={form.startMonth || 1}
+                    onChange={(e) => handleSelectChange('startMonth', Number(e.target.value))}
+                  >
+                    {Object.entries(monthLabels).map(([value, label]) => (
+                      <MenuItem key={value} value={parseInt(value)}>{label}</MenuItem>
+                    ))}
+                  </Select>
+                  {hasError('startMonth') && (
+                    <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 2 }}>
+                      {getErrorMessage('startMonth')}
+                    </Typography>
+                  )}
+                </FormControl>
+                <FormControl fullWidth error={hasError('endMonth')}>
+                  <InputLabel>Mes de Fin</InputLabel>
+                  <Select
+                    value={form.endMonth || 12}
+                    onChange={(e) => handleSelectChange('endMonth', Number(e.target.value))}
+                  >
+                    {Object.entries(monthLabels).map(([value, label]) => (
+                      <MenuItem key={value} value={parseInt(value)}>{label}</MenuItem>
+                    ))}
+                  </Select>
+                  {hasError('endMonth') && (
+                    <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 2 }}>
+                      {getErrorMessage('endMonth')}
+                    </Typography>
+                  )}
+                </FormControl>
+                <TextField
+                  label="Año del Plan"
+                  name="planYear"
+                  type="number"
+                  value={form.planYear || ''}
+                  onChange={handleChange}
+                  fullWidth
+                  inputProps={{ min: new Date().getFullYear(), max: new Date().getFullYear() + 10 }}
+                  error={hasError('planYear')}
+                  helperText={getErrorMessage('planYear') || 'Año del plan de ahorro'}
+                />
+                
+                {/* Campos opcionales adicionales */}
+                <TextField
+                  label="Saldo Mínimo (Opcional)"
+                  name="minBalance"
+                  value={form.minBalance ? formatCurrency(form.minBalance) : ''}
+                  onChange={handleCurrencyChange('minBalance')}
+                  fullWidth
+                  placeholder="0"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                />
+                <TextField
+                  label="Saldo Máximo (Opcional)"
+                  name="maxBalance"
+                  value={form.maxBalance ? formatCurrency(form.maxBalance) : ''}
+                  onChange={handleCurrencyChange('maxBalance')}
+                  fullWidth
+                  placeholder="0"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                />
+                <TextField
+                  label="Cuota de Manejo (Opcional)"
+                  name="monthlyFee"
+                  value={form.monthlyFee ? formatCurrency(form.monthlyFee) : ''}
+                  onChange={handleCurrencyChange('monthlyFee')}
+                  fullWidth
+                  placeholder="0"
+                  inputProps={{
+                    inputMode: 'numeric',
+                    pattern: '[0-9,]*'
+                  }}
+                  helperText="Cuota adicional de manejo"
                 />
               </Box>
             </Box>
@@ -456,9 +780,9 @@ export default function ProductManagement() {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Cancelar</Button>
-          <Button 
-            onClick={handleSave} 
-            variant="contained" 
+          <Button
+            onClick={handleSave}
+            variant="contained"
             disabled={submitLoading}
             startIcon={submitLoading ? <CircularProgress size={20} /> : null}
           >
